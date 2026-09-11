@@ -302,3 +302,338 @@ export async function loadChatMessages(
 
   return [];
 }
+
+/* ─────────────────────────────────────────────────────────────
+   CONVERSATION MANAGEMENT (sidebar history)
+───────────────────────────────────────────────────────────── */
+
+export interface ConversationRecord {
+  id: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export async function getConversations(userId: string): Promise<ConversationRecord[]> {
+  if (!supabase || !userId) return [];
+  try {
+    const { data, error } = await supabase
+      .from("conversations")
+      .select("id, title, created_at, updated_at")
+      .eq("user_id", userId)
+      .order("updated_at", { ascending: false })
+      .limit(30);
+
+    if (error || !data) return [];
+    return data.map((row: any) => ({
+      id: row.id,
+      title: row.title || "Conversation",
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    }));
+  } catch {
+    return [];
+  }
+}
+
+export async function createConversation(userId: string, firstMessage: string): Promise<string | null> {
+  if (!supabase || !userId) return null;
+  try {
+    // Auto-generate a title from first message (truncate to 50 chars)
+    const title = firstMessage.slice(0, 60) + (firstMessage.length > 60 ? "…" : "");
+    const { data, error } = await supabase
+      .from("conversations")
+      .insert([{
+        user_id: userId,
+        title,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }])
+      .select("id")
+      .single();
+
+    if (error || !data) return null;
+    return data.id;
+  } catch {
+    return null;
+  }
+}
+
+export async function updateConversationTimestamp(conversationId: string): Promise<void> {
+  if (!supabase || !conversationId) return;
+  try {
+    await supabase
+      .from("conversations")
+      .update({ updated_at: new Date().toISOString() })
+      .eq("id", conversationId);
+  } catch {}
+}
+
+export async function deleteConversation(conversationId: string): Promise<boolean> {
+  if (!supabase || !conversationId) return false;
+  try {
+    // Delete messages first, then conversation
+    await supabase.from("messages").delete().eq("conversation_id", conversationId);
+    const { error } = await supabase.from("conversations").delete().eq("id", conversationId);
+    return !error;
+  } catch {
+    return false;
+  }
+}
+
+export async function loadConversationMessages(
+  conversationId: string
+): Promise<Array<{ id: string; role: "user" | "assistant"; content: string; category?: string; isEmergency?: boolean; timestamp: string }>> {
+  if (!supabase || !conversationId) return [];
+  try {
+    const { data, error } = await supabase
+      .from("messages")
+      .select("*")
+      .eq("conversation_id", conversationId)
+      .order("created_at", { ascending: true })
+      .limit(100);
+
+    if (error || !data) return [];
+    return data.map((row: any) => ({
+      id: row.id,
+      role: row.role,
+      content: row.content,
+      category: row.category,
+      isEmergency: row.is_emergency,
+      timestamp: row.created_at,
+    }));
+  } catch {
+    return [];
+  }
+}
+
+export async function saveChatMessageToConversation(
+  conversationId: string,
+  userId: string,
+  message: { role: "user" | "assistant"; content: string; category?: string; isEmergency?: boolean }
+): Promise<void> {
+  if (!supabase || !conversationId || !userId) return;
+  try {
+    await supabase.from("messages").insert([{
+      conversation_id: conversationId,
+      user_id: userId,
+      role: message.role,
+      content: message.content,
+      category: message.category || "General Health",
+      is_emergency: message.isEmergency || false,
+      created_at: new Date().toISOString(),
+    }]);
+    await updateConversationTimestamp(conversationId);
+  } catch (e) {
+    console.error("[WellUP] saveChatMessageToConversation error:", e);
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════
+   MEDICAL REPORTS & APPOINTMENTS STORAGE
+   ═══════════════════════════════════════════════════════════ */
+
+export interface MedicalReportFact {
+  label: string;
+  value: string;
+  category?: "allergy" | "medication" | "vital" | "lab" | "condition" | "general";
+}
+
+export interface MedicalReport {
+  id: string;
+  userId?: string;
+  fileName: string;
+  filePath?: string;
+  fileType?: string;
+  fileSize?: number;
+  summary: string;
+  documentType?: string;
+  extractedFacts: MedicalReportFact[];
+  appointment?: string;
+  hasAppointment?: boolean;
+  reportDate?: string;
+  createdAt: string;
+  suggestedProfileUpdates?: {
+    allergies?: string[];
+    conditions?: string[];
+    medications?: string[];
+  };
+}
+
+const LOCAL_REPORTS_KEY = "wellup_medical_reports";
+const LOCAL_APPOINTMENTS_KEY = "wellup_appointments";
+
+export async function saveMedicalReport(
+  report: Omit<MedicalReport, "id" | "createdAt"> & { id?: string; createdAt?: string },
+  userId?: string
+): Promise<MedicalReport> {
+  const newReport: MedicalReport = {
+    ...report,
+    id: report.id || (typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `rep_${Date.now()}`),
+    userId: userId || undefined,
+    createdAt: report.createdAt || new Date().toISOString(),
+  };
+
+  // 1. Always persist in localStorage for instant offline & guest access
+  try {
+    if (typeof window !== "undefined") {
+      const existing: MedicalReport[] = JSON.parse(localStorage.getItem(LOCAL_REPORTS_KEY) || "[]");
+      const updated = [newReport, ...existing.filter(r => r.id !== newReport.id)];
+      localStorage.setItem(LOCAL_REPORTS_KEY, JSON.stringify(updated));
+    }
+  } catch (e) {
+    console.warn("[WellUP] Could not cache report locally:", e);
+  }
+
+  // 2. Persist to Supabase if authenticated
+  if (supabase && userId) {
+    try {
+      const row = {
+        user_id: userId,
+        file_name: newReport.fileName,
+        file_path: newReport.filePath || newReport.fileName,
+        summary: newReport.summary,
+        extracted_facts: newReport.extractedFacts,
+        report_date: newReport.reportDate || null,
+        created_at: newReport.createdAt,
+      };
+      const { data, error } = await supabase.from("reports").insert([row]).select();
+      if (!error && data && data[0]) {
+        newReport.id = data[0].id;
+      }
+    } catch (e) {
+      console.warn("[WellUP] Supabase report insert fallback:", e);
+    }
+  }
+
+  return newReport;
+}
+
+export async function loadMedicalReports(userId?: string): Promise<MedicalReport[]> {
+  let localList: MedicalReport[] = [];
+  try {
+    if (typeof window !== "undefined") {
+      localList = JSON.parse(localStorage.getItem(LOCAL_REPORTS_KEY) || "[]");
+    }
+  } catch {
+    localList = [];
+  }
+
+  if (!supabase || !userId) {
+    return localList;
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from("reports")
+      .select("*")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false });
+
+    if (error || !data) return localList;
+
+    const dbReports: MedicalReport[] = data.map((row: any) => ({
+      id: row.id,
+      userId: row.user_id,
+      fileName: row.file_name,
+      filePath: row.file_path,
+      summary: row.summary,
+      extractedFacts: Array.isArray(row.extracted_facts) ? row.extracted_facts : [],
+      reportDate: row.report_date,
+      createdAt: row.created_at,
+    }));
+
+    // Merge DB records with local records avoiding duplicates
+    const combined = [...dbReports];
+    for (const loc of localList) {
+      if (!combined.some(r => r.id === loc.id || r.fileName === loc.fileName)) {
+        combined.push(loc);
+      }
+    }
+    return combined;
+  } catch {
+    return localList;
+  }
+}
+
+export async function deleteMedicalReport(id: string, userId?: string): Promise<boolean> {
+  try {
+    if (typeof window !== "undefined") {
+      const existing: MedicalReport[] = JSON.parse(localStorage.getItem(LOCAL_REPORTS_KEY) || "[]");
+      const updated = existing.filter(r => r.id !== id);
+      localStorage.setItem(LOCAL_REPORTS_KEY, JSON.stringify(updated));
+    }
+  } catch (e) {
+    console.warn("[WellUP] Local report delete error:", e);
+  }
+
+  if (supabase && userId) {
+    try {
+      await supabase.from("reports").delete().eq("id", id).eq("user_id", userId);
+    } catch (e) {
+      console.warn("[WellUP] Supabase report delete error:", e);
+    }
+  }
+  return true;
+}
+
+export async function saveAppointmentReminder(
+  item: { title: string; appointmentAt?: string; sourceReportId?: string; notes?: string },
+  userId?: string
+): Promise<any> {
+  const record = {
+    id: typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `apt_${Date.now()}`,
+    userId,
+    title: item.title,
+    appointmentAt: item.appointmentAt,
+    sourceReportId: item.sourceReportId,
+    notes: item.notes,
+    createdAt: new Date().toISOString(),
+  };
+
+  try {
+    if (typeof window !== "undefined") {
+      const existing = JSON.parse(localStorage.getItem(LOCAL_APPOINTMENTS_KEY) || "[]");
+      localStorage.setItem(LOCAL_APPOINTMENTS_KEY, JSON.stringify([record, ...existing]));
+    }
+  } catch (e) {
+    console.warn("[WellUP] Local appointment save error:", e);
+  }
+
+  if (supabase && userId) {
+    try {
+      await supabase.from("appointments").insert([{
+        user_id: userId,
+        title: item.title,
+        appointment_at: item.appointmentAt || null,
+        source_report_id: item.sourceReportId || null,
+        notes: item.notes || null,
+      }]);
+    } catch (e) {
+      console.warn("[WellUP] Supabase appointment insert error:", e);
+    }
+  }
+  return record;
+}
+
+export async function loadAppointments(userId?: string): Promise<any[]> {
+  let list: any[] = [];
+  try {
+    if (typeof window !== "undefined") {
+      list = JSON.parse(localStorage.getItem(LOCAL_APPOINTMENTS_KEY) || "[]");
+    }
+  } catch {
+    list = [];
+  }
+  if (!supabase || !userId) return list;
+  try {
+    const { data } = await supabase
+      .from("appointments")
+      .select("*")
+      .eq("user_id", userId)
+      .order("appointment_at", { ascending: true });
+    if (data && data.length > 0) return data;
+  } catch {}
+  return list;
+}
+

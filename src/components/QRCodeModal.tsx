@@ -42,9 +42,11 @@ export function QRCodeModal({ isOpen, onClose }: { isOpen: boolean; onClose: () 
             style={{ color: "var(--muted)", position: "absolute" }}>
             <X className="w-5 h-5" />
           </button>
-          <div className="w-12 h-12 rounded-2xl mx-auto flex items-center justify-center mb-3"
-            style={{ background: "var(--primary)", boxShadow: "var(--shadow-md)" }}>
-            <QrCode className="w-6 h-6 text-white" />
+          <div
+            className="relative w-12 h-12 rounded-2xl mx-auto flex items-center justify-center mb-3 p-2 shadow-md border border-white/20"
+            style={{ background: "radial-gradient(circle, #34d399 20%, #10b981 60%, #059669 100%)" }}
+          >
+            <img src="/favicon.svg" alt="WellUP" className="w-8 h-8 rounded-lg object-contain drop-shadow" />
           </div>
           <h3 className="text-lg font-extrabold" style={{ color: "var(--text)" }}>Judge / Mobile Access</h3>
           <p className="text-xs mt-1" style={{ color: "var(--muted)" }}>

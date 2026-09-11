@@ -2,36 +2,35 @@
 
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
-  Send, Sparkles, RotateCcw,
-  FileText, QrCode, Lock, ChevronRight, MessageCircleQuestion,
-  Lightbulb, Scale, AlertTriangle, User as UserIcon, Leaf,
-  HeartPulse, Apple, SmilePlus, Activity, FlaskConical, Info,
-  CheckCircle2, LogIn, Database
+  AlertTriangle, Sparkles, Info, CheckCircle2,
+  Menu, X, FileText, Lock, ExternalLink, PanelLeft
 } from "lucide-react";
+
 import { BRAND, HEALTH_CATEGORIES, STARTER_QUESTIONS } from "@/lib/brand";
 import { HealthWord } from "@/lib/gemini";
-import { ThemeSelector } from "@/components/ThemeSelector";
-import { LanguageSelector } from "@/components/LanguageSelector";
+import { Sidebar, ConversationMeta } from "@/components/Sidebar";
+import { PromptBar } from "@/components/PromptBar";
 import { HealthWordsModal } from "@/components/HealthWordsModal";
 import { QRCodeModal } from "@/components/QRCodeModal";
 import { ReportUploadModal } from "@/components/ReportUploadModal";
 import { OnboardingModal, HealthProfile } from "@/components/OnboardingModal";
 import { AuthModal } from "@/components/AuthModal";
+import { extractUserDisplayInfo } from "@/lib/userProfile";
 import {
   supabase,
   getCurrentUser,
   fetchUserProfile,
   saveUserProfile,
   saveChatMessage,
+  signOutUser,
   loadChatMessages,
-  UserHealthProfile,
+  getConversations,
+  createConversation,
+  deleteConversation,
+  loadConversationMessages,
+  saveChatMessageToConversation,
   isSupabaseConfigured,
 } from "@/lib/supabase";
-
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Card, CardContent } from "@/components/ui/card";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 
 /* ─── Types ─── */
 interface Message {
@@ -45,21 +44,42 @@ interface Message {
   ts: string;
 }
 
-/* ─── Inline text formatter (bold → health word badges) ─── */
-function InlineText({ text, words, onWord }: { text: string; words: HealthWord[]; onWord: (w: HealthWord) => void }) {
+/* ─── Inline text: bold → health word badge ─── */
+function InlineText({
+  text,
+  words,
+  onWord,
+}: {
+  text: string;
+  words: HealthWord[];
+  onWord: (w: HealthWord) => void;
+}) {
   const parts = text.split(/(\*\*[^*]+\*\*)/g);
   return (
     <>
       {parts.map((p, i) => {
         if (p.startsWith("**") && p.endsWith("**")) {
           const term = p.slice(2, -2).trim();
-          const match = words.find(w => w.term.toLowerCase() === term.toLowerCase());
+          const match = words.find(
+            (w) => w.term.toLowerCase() === term.toLowerCase()
+          );
           return (
             <button
               key={i}
-              className="hw-tag mx-0.5 inline-flex items-center gap-1 font-semibold text-xs"
-              onClick={() => onWord(match || { term, definition: "A health or medical concept.", function: "", location: "", relatedTerms: [] })}
+              className="hw-tag mx-0.5"
+              onClick={() =>
+                onWord(
+                  match || {
+                    term,
+                    definition: "A health or medical concept.",
+                    function: "",
+                    location: "",
+                    relatedTerms: [],
+                  }
+                )
+              }
             >
+              <Sparkles style={{ width: 10, height: 10 }} />
               {term}
             </button>
           );
@@ -70,29 +90,54 @@ function InlineText({ text, words, onWord }: { text: string; words: HealthWord[]
   );
 }
 
-/* ─── Clean, minimal message renderer ─── */
-function MsgContent({ text, words, onWord }: { text: string; words: HealthWord[]; onWord: (w: HealthWord) => void }) {
+/* ─── Message content renderer ─── */
+function MsgContent({
+  text,
+  words,
+  onWord,
+}: {
+  text: string;
+  words: HealthWord[];
+  onWord: (w: HealthWord) => void;
+}) {
   const blocks = text.split(/\n\n+/);
   return (
-    <div className="text-sm leading-relaxed space-y-2 text-slate-800">
+    <div
+      style={{
+        fontSize: "0.875rem",
+        lineHeight: 1.65,
+        color: "var(--bubble-bot-fg)",
+      }}
+      className="space-y-2"
+    >
       {blocks.map((block, bi) => {
         if (!block.trim()) return null;
         const lines = block.split("\n");
-        const isBulletList = lines.every(l => l.trim().startsWith("• ") || l.trim().startsWith("- ") || !l.trim());
-        if (isBulletList && lines.some(l => l.trim().startsWith("• ") || l.trim().startsWith("- "))) {
+        const isBullet = lines.some(
+          (l) => l.trim().startsWith("• ") || l.trim().startsWith("- ")
+        );
+        if (isBullet) {
           return (
-            <ul key={bi} className="space-y-1.5 pl-1 my-1.5">
-              {lines.filter(l => l.trim().startsWith("• ") || l.trim().startsWith("- ")).map((line, li) => {
-                const cleanLine = line.replace(/^[•-]\s*/, "");
-                return (
-                  <li key={li} className="flex items-start gap-2 text-sm">
-                    <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-emerald-600 shrink-0" />
-                    <span>
-                      <InlineText text={cleanLine} words={words} onWord={onWord} />
-                    </span>
-                  </li>
-                );
-              })}
+            <ul key={bi} className="space-y-1.5 pl-1">
+              {lines
+                .filter(
+                  (l) =>
+                    l.trim().startsWith("• ") || l.trim().startsWith("- ")
+                )
+                .map((line, li) => {
+                  const clean = line.replace(/^[•\-]\s*/, "");
+                  return (
+                    <li key={li} className="flex items-start gap-2">
+                      <span
+                        className="mt-2 shrink-0 w-1.5 h-1.5 rounded-full"
+                        style={{ background: "var(--primary)" }}
+                      />
+                      <span>
+                        <InlineText text={clean} words={words} onWord={onWord} />
+                      </span>
+                    </li>
+                  );
+                })}
             </ul>
           );
         }
@@ -106,43 +151,61 @@ function MsgContent({ text, words, onWord }: { text: string; words: HealthWord[]
   );
 }
 
-/* ─── Build health context string from profile ─── */
+/* ─── Build health context string ─── */
 function buildHealthContext(profile: HealthProfile | null): string {
   if (!profile) return "";
   const parts: string[] = [];
-  if (profile.nickname)           parts.push(`Name: ${profile.nickname}`);
-  if (profile.ageGroup)           parts.push(`Age group: ${profile.ageGroup}`);
-  if (profile.overallHealth)      parts.push(`Overall health: ${profile.overallHealth}`);
-  if (profile.allergies?.length)  parts.push(`Allergies: ${profile.allergies.join(", ")}`);
-  if (profile.longTermConditions && profile.longTermConditions !== "No") parts.push(`Health conditions: ${profile.longTermConditions}`);
-  if (profile.sleepHours)         parts.push(`Sleep: ${profile.sleepHours} hours`);
-  if (profile.exerciseFrequency)  parts.push(`Exercise: ${profile.exerciseFrequency}`);
-  if (profile.goals?.length)      parts.push(`Health goals: ${profile.goals.join(", ")}`);
+  if (profile.nickname) parts.push(`Name: ${profile.nickname}`);
+  if (profile.ageGroup) parts.push(`Age group: ${profile.ageGroup}`);
+  if (profile.overallHealth) parts.push(`Overall health: ${profile.overallHealth}`);
+  if (profile.allergies?.length) parts.push(`Allergies: ${profile.allergies.join(", ")}`);
+  if (profile.longTermConditions && profile.longTermConditions !== "No")
+    parts.push(`Health conditions: ${profile.longTermConditions}`);
+  if (profile.sleepHours) parts.push(`Sleep: ${profile.sleepHours} hours`);
+  if (profile.exerciseFrequency) parts.push(`Exercise: ${profile.exerciseFrequency}`);
+  if (profile.goals?.length) parts.push(`Health goals: ${profile.goals.join(", ")}`);
   return parts.join(". ");
 }
 
-/* ─── Main Page ─── */
+/* ═══════════════════════════════════════════════════════════
+   MAIN PAGE
+   ═══════════════════════════════════════════════════════════ */
 export default function HomePage() {
-  const [msgs, setMsgs]                 = useState<Message[]>([]);
-  const [input, setInput]               = useState("");
-  const [loading, setLoading]           = useState(false);
-  const [language, setLanguage]         = useState("en");
-  const [profile, setProfile]           = useState<HealthProfile | null>(null);
-  const [selWord, setSelWord]           = useState<HealthWord | null>(null);
-  const [isQROpen, setQROpen]           = useState(false);
-  const [isReportOpen, setReportOpen]   = useState(false);
+  const [msgs, setMsgs] = useState<Message[]>([]);
+  const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [language, setLanguage] = useState("en");
+  const [profile, setProfile] = useState<HealthProfile | null>(null);
+  const [selWord, setSelWord] = useState<HealthWord | null>(null);
+  const [isQROpen, setQROpen] = useState(false);
+  const [isReportOpen, setReportOpen] = useState(false);
   const [isOnboardOpen, setOnboardOpen] = useState(false);
-  const [isAuthOpen, setAuthOpen]       = useState(false);
-  const [currentUser, setCurrentUser]   = useState<any | null>(null);
-  const [apiWarn, setApiWarn]           = useState<string | null>(null);
-  const [dbStatus, setDbStatus]         = useState<"connected" | "offline">("connected");
+  const [isAuthOpen, setAuthOpen] = useState(false);
+  const [currentUser, setCurrentUser] = useState<any | null>(null);
+  const [apiWarn, setApiWarn] = useState<string | null>(null);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [conversations, setConversations] = useState<ConversationMeta[]>([]);
+  const [activeConvId, setActiveConvId] = useState<string | null>(null);
 
   const bottomRef = useRef<HTMLDivElement>(null);
-  const inputRef  = useRef<HTMLInputElement>(null);
 
-  /* ── 1. Check Supabase Auth & Restore Session ── */
+  /* ── Responsive sidebar ── */
   useEffect(() => {
-    // Local storage fallback restore
+    const check = () => {
+      if (window.innerWidth < 768) {
+        setSidebarCollapsed(true);
+      } else {
+        setSidebarCollapsed(false);
+      }
+    };
+    check();
+    window.addEventListener("resize", check);
+    return () => window.removeEventListener("resize", check);
+  }, []);
+
+  /* ── Restore from localStorage ── */
+  useEffect(() => {
     try {
       const h = localStorage.getItem("wellup_chat");
       if (h) setMsgs(JSON.parse(h));
@@ -153,457 +216,545 @@ export default function HomePage() {
         if (parsed.language) setLanguage(parsed.language);
       }
     } catch {}
-
-    // Check Supabase Auth
-    if (supabase) {
-      supabase.auth.getSession().then(async ({ data: { session } }) => {
-        if (session?.user) {
-          setCurrentUser(session.user);
-          // Sync profile from Supabase DB
-          const dbProfile = await fetchUserProfile(session.user.id);
-          if (dbProfile) {
-            setProfile(prev => ({
-              ...prev,
-              nickname: dbProfile.nickname || prev?.nickname || "",
-              ageGroup: dbProfile.ageRange || prev?.ageGroup || "",
-              allergies: dbProfile.allergies || prev?.allergies || [],
-              conditions: dbProfile.conditions || [],
-              storageConsent: true,
-              overallHealth: dbProfile.overallHealth || prev?.overallHealth || "",
-              sleepHours: dbProfile.sleepHours || prev?.sleepHours || "",
-              exerciseFrequency: dbProfile.exerciseFrequency || prev?.exerciseFrequency || "",
-              goals: dbProfile.goals || prev?.goals || [],
-              dietType: dbProfile.dietPreference || prev?.dietType || "",
-              longTermConditions: prev?.longTermConditions || "",
-              heartBpConcerns: prev?.heartBpConcerns || "",
-              familyHistory: prev?.familyHistory || "",
-              sleepQuality: prev?.sleepQuality || "",
-              exerciseTypes: prev?.exerciseTypes || [],
-              fruitsVeggiesFreq: prev?.fruitsVeggiesFreq || "",
-              waterIntake: prev?.waterIntake || "",
-              smokingStatus: prev?.smokingStatus || "",
-              alcoholStatus: prev?.alcoholStatus || "",
-              sittingTime: prev?.sittingTime || "",
-              language: dbProfile.language || prev?.language || "en",
-            }));
-          }
-          // Sync chat history from Supabase DB
-          const dbChats = await loadChatMessages(session.user.id);
-          if (dbChats && dbChats.length > 0) {
-            setMsgs(dbChats.map(c => ({
-              id: c.id,
-              role: c.role,
-              content: c.content,
-              category: c.category,
-              isEmergency: c.isEmergency,
-              ts: new Date(c.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-            })));
-          }
-        }
-      });
-
-      // Listen to auth changes
-      const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
-        if (session?.user) {
-          setCurrentUser(session.user);
-          const dbProfile = await fetchUserProfile(session.user.id);
-          if (dbProfile) {
-            setProfile(prev => ({
-              ...prev,
-              nickname: dbProfile.nickname || prev?.nickname || "",
-              ageGroup: dbProfile.ageRange || prev?.ageGroup || "",
-              allergies: dbProfile.allergies || prev?.allergies || [],
-              storageConsent: true,
-              overallHealth: dbProfile.overallHealth || prev?.overallHealth || "",
-              sleepHours: dbProfile.sleepHours || prev?.sleepHours || "",
-              exerciseFrequency: dbProfile.exerciseFrequency || prev?.exerciseFrequency || "",
-              goals: dbProfile.goals || prev?.goals || [],
-              dietType: dbProfile.dietPreference || prev?.dietType || "",
-              longTermConditions: prev?.longTermConditions || "",
-              heartBpConcerns: prev?.heartBpConcerns || "",
-              familyHistory: prev?.familyHistory || "",
-              sleepQuality: prev?.sleepQuality || "",
-              exerciseTypes: prev?.exerciseTypes || [],
-              fruitsVeggiesFreq: prev?.fruitsVeggiesFreq || "",
-              waterIntake: prev?.waterIntake || "",
-              smokingStatus: prev?.smokingStatus || "",
-              alcoholStatus: prev?.alcoholStatus || "",
-              sittingTime: prev?.sittingTime || "",
-              language: dbProfile.language || prev?.language || "en",
-            }));
-          }
-          const dbChats = await loadChatMessages(session.user.id);
-          if (dbChats && dbChats.length > 0) {
-            setMsgs(dbChats.map(c => ({
-              id: c.id,
-              role: c.role,
-              content: c.content,
-              category: c.category,
-              isEmergency: c.isEmergency,
-              ts: new Date(c.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-            })));
-          }
-        } else {
-          setCurrentUser(null);
-        }
-      });
-
-      return () => {
-        authListener.subscription.unsubscribe();
-      };
-    }
   }, []);
 
-  /* Persist chat locally */
+  /* ── Supabase Auth ── */
   useEffect(() => {
-    if (msgs.length) localStorage.setItem("wellup_chat", JSON.stringify(msgs));
+    if (!supabase) return;
+
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      if (session?.user) {
+        setCurrentUser(session.user);
+        await syncUserData(session.user);
+      }
+    });
+
+    const { data: listener } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
+        if (session?.user) {
+          setCurrentUser(session.user);
+          await syncUserData(session.user);
+        } else {
+          setCurrentUser(null);
+          setConversations([]);
+        }
+      }
+    );
+
+    return () => listener.subscription.unsubscribe();
+  }, []);
+
+  async function syncUserData(user: any) {
+    const dbProfile = await fetchUserProfile(user.id);
+    if (dbProfile) {
+      setProfile((prev) => ({
+        ...prev,
+        nickname: dbProfile.nickname || prev?.nickname || "",
+        ageGroup: dbProfile.ageRange || prev?.ageGroup || "",
+        allergies: dbProfile.allergies || prev?.allergies || [],
+        conditions: dbProfile.conditions || [],
+        storageConsent: true,
+        overallHealth: dbProfile.overallHealth || prev?.overallHealth || "",
+        sleepHours: dbProfile.sleepHours || prev?.sleepHours || "",
+        exerciseFrequency: dbProfile.exerciseFrequency || prev?.exerciseFrequency || "",
+        goals: dbProfile.goals || prev?.goals || [],
+        dietType: dbProfile.dietPreference || prev?.dietType || "",
+        longTermConditions: prev?.longTermConditions || "",
+        heartBpConcerns: prev?.heartBpConcerns || "",
+        familyHistory: prev?.familyHistory || "",
+        sleepQuality: prev?.sleepQuality || "",
+        exerciseTypes: prev?.exerciseTypes || [],
+        fruitsVeggiesFreq: prev?.fruitsVeggiesFreq || "",
+        waterIntake: prev?.waterIntake || "",
+        smokingStatus: prev?.smokingStatus || "",
+        alcoholStatus: prev?.alcoholStatus || "",
+        sittingTime: prev?.sittingTime || "",
+        language: dbProfile.language || prev?.language || "en",
+      }));
+    }
+
+    // Load conversations for sidebar
+    const convs = await getConversations(user.id);
+    setConversations(
+      convs.map((c) => ({
+        id: c.id,
+        title: c.title,
+        createdAt: c.createdAt,
+      }))
+    );
+
+    // Load most recent conversation
+    if (convs.length > 0 && msgs.length === 0) {
+      const latestId = convs[0].id;
+      setActiveConvId(latestId);
+      const dbMsgs = await loadConversationMessages(latestId);
+      if (dbMsgs.length > 0) {
+        setMsgs(
+          dbMsgs.map((m) => ({
+            id: m.id,
+            role: m.role,
+            content: m.content,
+            category: m.category,
+            isEmergency: m.isEmergency,
+            ts: new Date(m.timestamp).toLocaleTimeString([], {
+              hour: "2-digit",
+              minute: "2-digit",
+            }),
+          }))
+        );
+      }
+    }
+  }
+
+  /* ── Persist chat locally ── */
+  useEffect(() => {
+    if (msgs.length)
+      localStorage.setItem("wellup_chat", JSON.stringify(msgs.slice(-60)));
   }, [msgs]);
 
-  /* Auto-scroll */
+  /* ── Auto-scroll ── */
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [msgs, loading]);
 
-  /* Send message */
-  const send = useCallback(async (text?: string, opts?: { explainSimply?: boolean }) => {
-    const q = (text ?? input).trim();
-    if (!q || loading) return;
-    if (!text) setInput("");
-
-    const nowTs = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-    const userMsg: Message = {
-      id: `u${Date.now()}`,
-      role: "user",
-      content: q,
-      ts: nowTs,
-    };
-    setMsgs(prev => [...prev, userMsg]);
-    setLoading(true);
-
-    // Save to Supabase if logged in
-    if (currentUser) {
-      saveChatMessage(currentUser.id, { role: "user", content: q });
-    }
-
-    try {
-      const res = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          message: q,
-          language,
-          explainSimply: opts?.explainSimply ?? false,
-          userHealthContext: buildHealthContext(profile),
-          history: msgs.slice(-8).map(m => ({
-            role: m.role === "assistant" ? "model" : "user",
-            parts: m.content,
-          })),
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      if (data.apiKeyWarning) setApiWarn(data.apiKeyWarning);
-
-      const botMsg: Message = {
-        id: `a${Date.now()}`,
-        role: "assistant",
-        content: data.response || "No response received.",
-        category: data.category,
-        healthWords: data.healthWords || [],
-        sources: data.sources || [],
-        isEmergency: Boolean(data.isEmergency),
-        ts: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-      };
-      setMsgs(prev => [...prev, botMsg]);
-
-      // Save bot reply to Supabase if logged in
-      if (currentUser) {
-        saveChatMessage(currentUser.id, {
-          role: "assistant",
-          content: botMsg.content,
-          category: botMsg.category,
-          isEmergency: botMsg.isEmergency,
-        });
-      }
-    } catch {
-      setMsgs(prev => [...prev, {
-        id: `e${Date.now()}`,
-        role: "assistant",
-        content: "⚠️ Connection issue. Please try again.",
-        ts: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-      }]);
-    } finally {
-      setLoading(false);
-      setTimeout(() => inputRef.current?.focus(), 50);
-    }
-  }, [input, language, loading, msgs, profile, currentUser]);
-
-  const clearChat = () => {
-    if (!msgs.length) return;
-    if (confirm("Clear your private chat history?")) {
-      setMsgs([]);
-      localStorage.removeItem("wellup_chat");
-    }
+  /* ── New Chat ── */
+  const handleNewChat = () => {
+    setMsgs([]);
+    setActiveConvId(null);
+    localStorage.removeItem("wellup_chat");
+    if (window.innerWidth < 768) setSidebarCollapsed(true);
   };
 
+  /* ── Select conversation ── */
+  const handleSelectConv = async (id: string) => {
+    if (id === activeConvId) return;
+    setActiveConvId(id);
+    setMsgs([]);
+    const dbMsgs = await loadConversationMessages(id);
+    setMsgs(
+      dbMsgs.map((m) => ({
+        id: m.id,
+        role: m.role,
+        content: m.content,
+        category: m.category,
+        isEmergency: m.isEmergency,
+        ts: new Date(m.timestamp).toLocaleTimeString([], {
+          hour: "2-digit",
+          minute: "2-digit",
+        }),
+      }))
+    );
+    if (window.innerWidth < 768) setSidebarCollapsed(true);
+  };
+
+  /* ── Delete conversation ── */
+  const handleDeleteConv = async (id: string) => {
+    await deleteConversation(id);
+    setConversations((prev) => prev.filter((c) => c.id !== id));
+    if (activeConvId === id) handleNewChat();
+  };
+
+  /* ── Send message ── */
+  const send = useCallback(
+    async (text?: string, opts?: { explainSimply?: boolean }) => {
+      const q = (text ?? input).trim();
+      if (!q || loading) return;
+      if (!text) setInput("");
+
+      const nowTs = new Date().toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+      const userMsg: Message = {
+        id: `u${Date.now()}`,
+        role: "user",
+        content: q,
+        ts: nowTs,
+      };
+      setMsgs((prev) => [...prev, userMsg]);
+      setLoading(true);
+
+      // Create conversation in Supabase if needed
+      let convId = activeConvId;
+      if (currentUser && !convId) {
+        const newId = await createConversation(currentUser.id, q);
+        if (newId) {
+          convId = newId;
+          setActiveConvId(newId);
+          setConversations((prev) => [
+            { id: newId, title: q.slice(0, 60), createdAt: new Date().toISOString() },
+            ...prev,
+          ]);
+        }
+      }
+
+      // Save user message
+      if (currentUser && convId) {
+        saveChatMessageToConversation(convId, currentUser.id, { role: "user", content: q });
+      } else if (currentUser) {
+        saveChatMessage(currentUser.id, { role: "user", content: q });
+      }
+
+      try {
+        const res = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            message: q,
+            language,
+            explainSimply: opts?.explainSimply ?? false,
+            userHealthContext: buildHealthContext(profile),
+            history: msgs.slice(-10).map((m) => ({
+              role: m.role === "assistant" ? "model" : "user",
+              parts: m.content,
+            })),
+            conversationId: convId,
+          }),
+        });
+
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error);
+        if (data.apiKeyWarning) setApiWarn(data.apiKeyWarning);
+
+        const botMsg: Message = {
+          id: `a${Date.now()}`,
+          role: "assistant",
+          content: data.response || "No response received.",
+          category: data.category,
+          healthWords: data.healthWords || [],
+          sources: data.sources || [],
+          isEmergency: Boolean(data.isEmergency),
+          ts: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+        };
+        setMsgs((prev) => [...prev, botMsg]);
+
+        // Save bot message
+        if (currentUser && convId) {
+          saveChatMessageToConversation(convId, currentUser.id, {
+            role: "assistant",
+            content: botMsg.content,
+            category: botMsg.category,
+            isEmergency: botMsg.isEmergency,
+          });
+        } else if (currentUser) {
+          saveChatMessage(currentUser.id, {
+            role: "assistant",
+            content: botMsg.content,
+            category: botMsg.category,
+            isEmergency: botMsg.isEmergency,
+          });
+        }
+      } catch {
+        setMsgs((prev) => [
+          ...prev,
+          {
+            id: `e${Date.now()}`,
+            role: "assistant",
+            content: "⚠️ Connection issue. Please try again.",
+            ts: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+          },
+        ]);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [input, language, loading, msgs, profile, currentUser, activeConvId]
+  );
+
   const hasChat = msgs.length > 0;
-  const userInitials = (profile?.nickname || currentUser?.email || "U").slice(0, 2).toUpperCase();
+  const userDisplay = extractUserDisplayInfo(currentUser?.email, profile?.nickname);
 
+  /* ─────────────────────────────────────────────────────────────
+     RENDER
+  ───────────────────────────────────────────────────────────── */
   return (
-    <div className="min-h-screen flex flex-col bg-slate-50/50">
+    <div className="chat-layout">
 
-      {/* ──────── NAVBAR ──────── */}
-      <header className="sticky top-0 z-40 border-b border-border bg-white/95 backdrop-blur-md">
-        <div className="max-w-4xl mx-auto px-4 h-14 flex items-center justify-between gap-3">
+      {/* ── SIDEBAR ── */}
+      <Sidebar
+        conversations={conversations}
+        activeConvId={activeConvId}
+        onNewChat={handleNewChat}
+        onSelectConv={handleSelectConv}
+        onDeleteConv={handleDeleteConv}
+        onCategoryClick={(q) => {
+          send(q);
+          if (window.innerWidth < 768) setSidebarCollapsed(true);
+        }}
+        onAuthClick={() => setAuthOpen(true)}
+        onProfileClick={() => setOnboardOpen(true)}
+        onReportClick={() => setReportOpen(true)}
+        onThemeClick={() => {}}
+        currentUser={currentUser}
+        userNickname={userDisplay.displayName}
+        collapsed={sidebarCollapsed}
+        onClose={() => setSidebarCollapsed(true)}
+      />
 
-          {/* Logo & Favicon */}
-          <div className="flex items-center gap-2.5">
+      {/* ── MAIN COLUMN ── */}
+      <div className="chat-main">
+
+        {/* ── FLOATING APPLE-STYLE CORNER BADGES (No full-width topbar) ── */}
+        <div className="pointer-events-none absolute top-3.5 left-3 sm:left-5 right-3 sm:right-5 z-20 flex items-center justify-between">
+          {/* Top-Left: WellUP Logo + SDG 3 Badge + Sidebar Expand Button */}
+          <div className="pointer-events-auto flex items-center gap-2 px-3 py-1.5 rounded-full backdrop-blur-xl bg-white/80 dark:bg-black/60 border border-black/10 dark:border-white/10 shadow-lg text-xs font-medium text-zinc-900 dark:text-white select-none transition-all duration-300 ease-out">
+            <div
+              className={`flex items-center overflow-hidden transition-all duration-300 ease-out ${
+                sidebarCollapsed ? "w-6 opacity-100 mr-0.5" : "w-0 opacity-0 mr-0 pointer-events-none"
+              }`}
+            >
+              <button
+                onClick={() => setSidebarCollapsed(false)}
+                className="p-1 -ml-1 rounded-full hover:bg-black/10 dark:hover:bg-white/15 text-zinc-600 dark:text-zinc-300 hover:text-black dark:hover:text-white transition-colors shrink-0"
+                title="Open sidebar"
+              >
+                <PanelLeft className="w-4 h-4" />
+              </button>
+            </div>
             <img
               src="/favicon.svg"
-              alt="WellUP Logo"
-              className="w-8 h-8 rounded-lg shadow-sm border border-emerald-100"
+              alt="WellUP"
+              className="w-5 h-5 rounded-lg border border-white/10 shadow-sm shrink-0"
             />
-            <div>
-              <span className="font-extrabold text-base tracking-tight text-slate-900">
-                {BRAND.name}
-              </span>
-              <Badge variant="secondary" className="ml-1.5 text-[10px] bg-emerald-50 text-emerald-700 border-emerald-200 py-0 px-1.5 font-bold">
-                SDG 3
-              </Badge>
-            </div>
+            <span className="font-bold tracking-tight text-[13px] text-zinc-900 dark:text-white whitespace-nowrap">
+              {BRAND.name}
+            </span>
+            <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 whitespace-nowrap shrink-0">
+              SDG 3
+            </span>
           </div>
 
-          {/* Controls with real shadcn components */}
-          <div className="flex items-center gap-1.5">
-            <LanguageSelector
-              language={language}
-              onChange={l => {
-                setLanguage(l);
-                if (profile) setProfile({ ...profile, language: l });
-              }}
-            />
-            <ThemeSelector />
-
-            {/* Auth / Account Button */}
-            <Button
-              variant="outline"
-              size="sm"
+          {/* Top-Right: Profile / Sync Status */}
+          <div className="pointer-events-auto flex items-center gap-2">
+            <button
               onClick={() => setAuthOpen(true)}
-              className="h-8 gap-1.5 text-xs font-semibold border-border hover:bg-slate-100"
-              title={currentUser ? "View account & Supabase DB sync" : "Sign in / Save health profile"}
+              className="flex items-center gap-2 px-3 py-1.5 rounded-full backdrop-blur-xl bg-black/40 dark:bg-black/60 border border-white/10 shadow-lg text-xs font-medium text-white hover:border-emerald-500/40 hover:bg-black/60 transition-all select-none"
             >
               {currentUser ? (
                 <>
-                  <Avatar className="w-5 h-5">
-                    <AvatarFallback className="text-[10px] bg-emerald-600 text-white font-bold">
-                      {userInitials}
-                    </AvatarFallback>
-                  </Avatar>
-                  <span className="hidden sm:inline">{profile?.nickname || currentUser.email?.split("@")[0]}</span>
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" title="Connected to Supabase DB" />
+                  <div
+                    className="w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold text-white shrink-0 overflow-hidden border border-emerald-500/40"
+                    style={{ background: "var(--primary)" }}
+                  >
+                    {userDisplay.avatarUrl ? (
+                      <img
+                        src={userDisplay.avatarUrl}
+                        alt={userDisplay.displayName}
+                        className="w-full h-full object-cover"
+                        onError={(e) => {
+                          (e.currentTarget as HTMLElement).style.display = "none";
+                        }}
+                      />
+                    ) : (
+                      <span>{userDisplay.initials}</span>
+                    )}
+                  </div>
+                  <span className="max-w-[120px] truncate text-zinc-200 font-semibold">{userDisplay.displayName}</span>
+                  <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" title="Synced" />
                 </>
               ) : (
-                <>
-                  <LogIn className="w-3.5 h-3.5 text-emerald-600" />
-                  <span className="hidden sm:inline">Sign In</span>
-                </>
+                <span>Sign In</span>
               )}
-            </Button>
-
-            {/* Onboarding Health Profile */}
-            <Button
-              variant={profile ? "secondary" : "outline"}
-              size="sm"
-              onClick={() => setOnboardOpen(true)}
-              className="h-8 gap-1.5 text-xs font-semibold"
-              title="Health Profile & Onboarding"
-            >
-              <UserIcon className="w-3.5 h-3.5 text-emerald-600" />
-              <span className="hidden md:inline">{profile ? "Health Profile ✓" : "Profile"}</span>
-            </Button>
-
-            {/* QR Modal */}
-            <Button
-              variant="outline"
-              size="icon"
-              onClick={() => setQROpen(true)}
-              className="w-8 h-8 rounded-lg"
-              title="QR Code for judges & mobile test"
-            >
-              <QrCode className="w-3.5 h-3.5 text-slate-600" />
-            </Button>
+            </button>
           </div>
         </div>
-      </header>
 
-      {/* ──────── MAIN ──────── */}
-      <main className="flex-1 max-w-4xl w-full mx-auto px-4 py-3 flex flex-col gap-3">
-
-        {/* API Key Notice Banner if not configured */}
+        {/* ── API WARN BANNER ── */}
         {apiWarn && (
-          <div className="flex items-start gap-2.5 p-3 rounded-xl text-xs bg-amber-50 border border-amber-200 text-amber-900 anim-fadeUp">
-            <Info className="w-4 h-4 mt-0.5 shrink-0 text-amber-600" />
-            <div className="flex-1">
-              <strong>Notice:</strong> {apiWarn}. Educational fallback engine is active and ready.
-            </div>
-            <button onClick={() => setApiWarn(null)} className="font-bold text-amber-700 hover:text-amber-900">✕</button>
+          <div
+            className="flex items-center gap-2.5 px-4 py-2 text-xs"
+            style={{
+              background: "#FFF7ED",
+              borderBottom: "1px solid #FED7AA",
+              color: "#9A3412",
+            }}
+          >
+            <Info style={{ width: 13, height: 13, flexShrink: 0 }} />
+            <span className="flex-1">
+              <strong>Notice:</strong> {apiWarn}
+            </span>
+            <button
+              onClick={() => setApiWarn(null)}
+              style={{ color: "#9A3412", fontWeight: 700 }}
+            >
+              ✕
+            </button>
           </div>
         )}
 
-        {/* Minimal Safe Status Bar */}
-        <div className="flex items-center justify-between gap-3 px-3.5 py-2 rounded-xl text-xs bg-emerald-50/70 border border-emerald-100">
-          <div className="flex items-center gap-2 text-emerald-900">
-            <Lock className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-            <span>
-              {currentUser ? (
-                <>
-                  Logged in as <strong>{currentUser.email}</strong> • Synced with Supabase DB
-                </>
-              ) : (
-                <>
-                  <strong>Private Mode:</strong> 100% confidential. Education only, not medical diagnosis.
-                </>
-              )}
-            </span>
-          </div>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setReportOpen(true)}
-            className="h-6 px-2 text-xs font-semibold text-emerald-700 hover:bg-emerald-100 gap-1"
-          >
-            <FileText className="w-3 h-3" />
-            <span className="hidden sm:inline">Analyze Report</span>
-          </Button>
-        </div>
-
-        {/* ──────── MESSAGES / EMPTY STATE ──────── */}
-        <div className="flex-1 flex flex-col gap-3 overflow-y-auto pb-2" style={{ minHeight: 0 }}>
-
+        {/* ── MESSAGES ── */}
+        <div className="chat-messages">
           {!hasChat ? (
             /* ── EMPTY STATE ── */
-            <div className="flex-1 flex flex-col gap-6 py-4 anim-fadeUp">
-
-              {/* Minimal Hero */}
-              <div className="text-center max-w-md mx-auto space-y-2.5">
-                <img
-                  src="/favicon.svg"
-                  alt="WellUP"
-                  className="w-12 h-12 rounded-xl mx-auto shadow-sm border border-emerald-100"
-                />
-                <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900">
+            <div className={`chat-layout-wrapper ${sidebarCollapsed ? "collapsed" : ""} py-8 anim-fadeUp flex flex-col items-center`}>
+              {/* Hero */}
+              <div className="text-center max-w-md space-y-3 mb-8">
+                <div
+                  className="w-14 h-14 rounded-2xl mx-auto flex items-center justify-center"
+                  style={{
+                    background: "var(--primary)",
+                    boxShadow: "0 4px 20px rgba(45,125,103,0.3)",
+                  }}
+                >
+                  <img src="/favicon.svg" alt="WellUP" className="w-9 h-9" />
+                </div>
+                <h1
+                  className="text-2xl font-extrabold tracking-tight"
+                  style={{ color: "var(--text)" }}
+                >
                   {BRAND.tagline}
                 </h1>
-                <p className="text-xs sm:text-sm text-slate-600 leading-relaxed">
-                  Ask clear, honest health questions about your body, nutrition, puberty, periods, sleep, or stress. No judgment.
+                <p className="text-sm" style={{ color: "var(--text-muted)", lineHeight: 1.65 }}>
+                  Ask about your body, periods, nutrition, sleep, stress — anything health-related.
+                  Completely private. Zero judgment.
                 </p>
 
                 {!currentUser && (
-                  <div className="pt-1 flex items-center justify-center gap-2">
-                    <Button
-                      size="sm"
+                  <div className="flex items-center justify-center gap-2 pt-1">
+                    <button
                       onClick={() => setAuthOpen(true)}
-                      className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs h-8 px-3 gap-1.5"
+                      className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold transition-all"
+                      style={{
+                        background: "var(--primary)",
+                        color: "#fff",
+                        boxShadow: "0 2px 8px rgba(45,125,103,0.25)",
+                      }}
                     >
-                      <Database className="w-3.5 h-3.5" />
-                      Sign In & Save History
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
+                      Sign in & Save History
+                    </button>
+                    <button
                       onClick={() => setOnboardOpen(true)}
-                      className="text-xs h-8 px-3"
+                      className="px-4 py-2 rounded-lg text-sm font-semibold"
+                      style={{
+                        background: "var(--primary-light)",
+                        color: "var(--primary)",
+                        border: "1px solid var(--hw-border)",
+                      }}
                     >
                       Set Health Profile
-                    </Button>
+                    </button>
                   </div>
                 )}
               </div>
 
-              {/* Category Cards using shadcn Card */}
-              <div className="max-w-2xl mx-auto w-full">
-                <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-2.5">
+              {/* Category Cards */}
+              <div className="w-full max-w-2xl sm:max-w-3xl transition-all duration-300">
+                <p
+                  className="text-xs font-semibold uppercase tracking-widest mb-3"
+                  style={{ color: "var(--text-muted)" }}
+                >
                   Explore Topics
                 </p>
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
-                  {HEALTH_CATEGORIES.map(cat => (
-                    <Card
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 stagger-children">
+                  {HEALTH_CATEGORIES.map((cat) => (
+                    <button
                       key={cat.id}
                       onClick={() => send(cat.questions[0])}
-                      className="cursor-pointer hover:border-emerald-500 hover:shadow-sm transition-all group border-border bg-white"
+                      className="category-card text-left anim-fadeUp"
                     >
-                      <CardContent className="p-3 space-y-1">
-                        <div className="flex items-center justify-between">
-                          <span className="text-lg">{cat.emoji}</span>
-                          <ChevronRight className="w-3.5 h-3.5 text-slate-400 group-hover:text-emerald-600 transition-colors" />
-                        </div>
-                        <p className="font-bold text-xs text-slate-800">{cat.name}</p>
-                        <p className="text-[11px] text-slate-500 line-clamp-1">{cat.questions[0]}</p>
-                      </CardContent>
-                    </Card>
+                      <span className="text-xl">{cat.emoji}</span>
+                      <p
+                        className="font-semibold text-xs"
+                        style={{ color: "var(--text)" }}
+                      >
+                        {cat.name}
+                      </p>
+                      <p
+                        className="text-xs line-clamp-1"
+                        style={{ color: "var(--text-muted)" }}
+                      >
+                        {cat.questions[0]}
+                      </p>
+                    </button>
                   ))}
                 </div>
               </div>
 
-              {/* Quick Starters */}
-              <div className="max-w-xl mx-auto w-full">
-                <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-2">
+              {/* Starter questions */}
+              <div className="w-full max-w-2xl sm:max-w-3xl mt-6 transition-all duration-300">
+                <p
+                  className="text-xs font-semibold uppercase tracking-widest mb-2.5"
+                  style={{ color: "var(--text-muted)" }}
+                >
                   Popular Questions
                 </p>
                 <div className="flex flex-wrap gap-1.5">
                   {STARTER_QUESTIONS.map((q, i) => (
-                    <Button
+                    <button
                       key={i}
-                      variant="outline"
-                      size="sm"
                       onClick={() => send(q)}
-                      className="text-xs h-7 px-2.5 bg-white text-slate-700 hover:border-emerald-500 hover:text-emerald-700"
+                      className="px-3 py-1.5 rounded-lg text-xs font-medium transition-all"
+                      style={{
+                        background: "var(--surface-raised)",
+                        color: "var(--text-secondary)",
+                        border: "1px solid var(--border)",
+                      }}
+                      onMouseEnter={(e) => {
+                        (e.currentTarget as HTMLElement).style.borderColor = "var(--primary)";
+                        (e.currentTarget as HTMLElement).style.color = "var(--primary)";
+                      }}
+                      onMouseLeave={(e) => {
+                        (e.currentTarget as HTMLElement).style.borderColor = "var(--border)";
+                        (e.currentTarget as HTMLElement).style.color = "var(--text-secondary)";
+                      }}
                     >
                       {q}
-                    </Button>
+                    </button>
                   ))}
                 </div>
               </div>
             </div>
           ) : (
-            /* ── ACTIVE CHAT: CLEAN, NORMAL, MINIMAL MESSAGES ── */
-            <>
-              {msgs.map(msg => (
+            /* ── ACTIVE CHAT ── */
+            <div className={`chat-layout-wrapper ${sidebarCollapsed ? "collapsed" : ""} space-y-4`}>
+              {msgs.map((msg, idx) => (
                 <div
                   key={msg.id}
-                  className={`flex gap-2.5 ${msg.role === "user" ? "justify-end" : "justify-start"}`}
+                  className={`msg-wrap ${msg.role === "user" ? "user" : "bot"} anim-fadeUp`}
+                  style={{ animationDelay: `${Math.min(idx * 20, 200)}ms` }}
                 >
-                  {/* Bot Logo Avatar */}
+                  {/* Bot avatar */}
                   {msg.role === "assistant" && (
                     <img
                       src="/favicon.svg"
                       alt="WellUP"
-                      className="w-7 h-7 rounded-lg shrink-0 mt-0.5 border border-emerald-100 shadow-2xs"
+                      className="w-7 h-7 rounded-lg shrink-0 mt-0.5"
+                      style={{ border: "1px solid var(--border)" }}
                     />
                   )}
 
                   <div
-                    className={`max-w-[85%] sm:max-w-[78%] px-4 py-3 rounded-2xl ${
-                      msg.role === "user"
-                        ? "bg-emerald-600 text-white rounded-tr-xs"
-                        : msg.isEmergency
-                        ? "bg-rose-50 border border-rose-200 rounded-tl-xs shadow-xs"
-                        : "bg-white border border-slate-200 rounded-tl-xs shadow-2xs"
-                    }`}
+                    className={`bubble ${msg.role === "user" ? "user" : msg.isEmergency ? "emergency" : "bot"}`}
                   >
-                    {/* Emergency Alert */}
+                    {/* Emergency banner */}
                     {msg.isEmergency && (
-                      <div className="flex items-center gap-2 mb-2 px-2.5 py-1.5 rounded-lg bg-rose-100/70 border border-rose-300">
-                        <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
-                        <span className="text-xs font-bold text-rose-800">
-                          Emergency assistance: Call 112 or 108 immediately
+                      <div
+                        className="flex items-center gap-2 mb-2.5 px-3 py-1.5 rounded-lg"
+                        style={{
+                          background: "var(--emergency-light)",
+                          border: "1px solid var(--emergency-border)",
+                        }}
+                      >
+                        <AlertTriangle
+                          style={{ width: 14, height: 14, color: "var(--emergency)", flexShrink: 0 }}
+                        />
+                        <span
+                          className="text-xs font-bold"
+                          style={{ color: "var(--emergency)" }}
+                        >
+                          Emergency: Call 112 or 108 immediately
                         </span>
                       </div>
                     )}
 
-                    {/* Clean Message Content */}
+                    {/* Message body */}
                     {msg.role === "user" ? (
-                      <p className="text-sm font-medium text-white">{msg.content}</p>
+                      <p
+                        className="text-sm font-medium"
+                        style={{ color: "var(--bubble-user-fg)" }}
+                      >
+                        {msg.content}
+                      </p>
                     ) : (
                       <MsgContent
                         text={msg.content}
@@ -612,165 +763,156 @@ export default function HomePage() {
                       />
                     )}
 
-                    {/* Subtle Health Words if any */}
-                    {msg.role === "assistant" && msg.healthWords && msg.healthWords.length > 0 && (
-                      <div className="mt-2.5 pt-2 border-t border-slate-100 flex flex-wrap items-center gap-1.5 text-[11px]">
-                        <span className="text-slate-400 font-medium text-[10px]">Explore terms:</span>
-                        {msg.healthWords.map((hw, i) => (
-                          <button
-                            key={i}
-                            onClick={() => setSelWord(hw)}
-                            className="hw-tag text-[11px]"
+                    {/* Health words tray */}
+                    {msg.role === "assistant" &&
+                      msg.healthWords &&
+                      msg.healthWords.length > 0 && (
+                        <div
+                          className="mt-2.5 pt-2 flex flex-wrap items-center gap-1.5"
+                          style={{
+                            borderTop: "1px solid var(--border-subtle)",
+                          }}
+                        >
+                          <span
+                            className="text-[10px] font-semibold"
+                            style={{ color: "var(--text-muted)" }}
                           >
-                            <Sparkles className="w-2.5 h-2.5 mr-0.5" />
-                            {hw.term}
-                          </button>
-                        ))}
-                      </div>
-                    )}
+                            Health Words:
+                          </span>
+                          {msg.healthWords.map((hw, i) => (
+                            <button
+                              key={i}
+                              onClick={() => setSelWord(hw)}
+                              className="hw-tag"
+                            >
+                              <Sparkles style={{ width: 10, height: 10 }} />
+                              {hw.term}
+                            </button>
+                          ))}
+                        </div>
+                      )}
 
-                    {/* Subtle bottom info: Category + Timestamp */}
-                    <div className="mt-1.5 flex items-center justify-between text-[10px] text-slate-400">
+                    {/* Sources */}
+                    {msg.role === "assistant" &&
+                      msg.sources &&
+                      msg.sources.length > 0 && (
+                        <div className="mt-2 flex flex-wrap gap-1">
+                          {msg.sources.map((src, i) => (
+                            <span key={i} className="source-pill">
+                              {src}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+
+                    {/* Footer */}
+                    <div
+                      className="mt-1.5 flex items-center justify-between"
+                      style={{ fontSize: "0.68rem", color: "var(--text-muted)" }}
+                    >
                       {msg.role === "assistant" && msg.category ? (
-                        <span className="font-semibold text-emerald-700/80">{msg.category}</span>
-                      ) : <span />}
-                      <span className={msg.role === "user" ? "text-emerald-100 ml-auto" : ""}>{msg.ts}</span>
+                        <span
+                          className="font-semibold"
+                          style={{ color: "var(--primary)", opacity: 0.8 }}
+                        >
+                          {msg.category}
+                        </span>
+                      ) : (
+                        <span />
+                      )}
+                      <span
+                        style={{
+                          color:
+                            msg.role === "user"
+                              ? "rgba(255,255,255,0.55)"
+                              : "var(--text-muted)",
+                        }}
+                      >
+                        {msg.ts}
+                      </span>
                     </div>
                   </div>
                 </div>
               ))}
 
-              {/* Minimal Thinking Indicator */}
+              {/* Typing indicator */}
               {loading && (
-                <div className="flex gap-2.5 justify-start items-center">
-                  <img src="/favicon.svg" alt="WellUP" className="w-7 h-7 rounded-lg border border-emerald-100" />
-                  <div className="bg-white border border-slate-200 px-3.5 py-2.5 rounded-2xl rounded-tl-xs flex items-center gap-1.5 shadow-2xs">
-                    <div className="dot" /><div className="dot" /><div className="dot" />
-                    <span className="text-xs text-slate-400 ml-1">Thinking…</span>
+                <div className="msg-wrap bot anim-fadeIn">
+                  <img
+                    src="/favicon.svg"
+                    alt="WellUP"
+                    className="w-7 h-7 rounded-lg shrink-0 mt-0.5"
+                    style={{ border: "1px solid var(--border)" }}
+                  />
+                  <div
+                    className="bubble bot flex items-center gap-1.5"
+                    style={{ padding: "12px 16px" }}
+                  >
+                    <div className="dot" />
+                    <div className="dot" />
+                    <div className="dot" />
+                    <span
+                      className="ml-1 text-xs"
+                      style={{ color: "var(--text-muted)" }}
+                    >
+                      Thinking…
+                    </span>
                   </div>
                 </div>
               )}
               <div ref={bottomRef} />
-            </>
+            </div>
           )}
         </div>
 
-        {/* ──────── QUICK ACTIONS + MINIMAL INPUT BAR ──────── */}
-        <div className="flex flex-col gap-2 pt-1">
+        {/* ── PROMPT BAR (sticky bottom) ── */}
+        <PromptBar
+          value={input}
+          onChange={setInput}
+          onSend={(opts) => send(undefined, opts)}
+          onSuggest={() => send("I'm not sure what to ask. Can you suggest some health questions for me?")}
+          onMythFact={() => send("Is it true that you shouldn't exercise during your period?")}
+          onUploadReport={() => setReportOpen(true)}
+          loading={loading}
+          language={language}
+          sidebarCollapsed={sidebarCollapsed}
+          onLanguageChange={(l) => {
+            setLanguage(l);
+            if (profile) setProfile({ ...profile, language: l });
+          }}
+        />
+      </div>
 
-          {/* Quick action buttons */}
-          {hasChat && (
-            <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5">
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={loading}
-                className="h-7 text-xs gap-1 bg-white"
-                onClick={() => {
-                  const last = [...msgs].reverse().find(m => m.role === "user");
-                  if (last) send(last.content, { explainSimply: true });
-                }}
-              >
-                <Lightbulb className="w-3.5 h-3.5 text-amber-500" />
-                Explain simply
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={loading}
-                className="h-7 text-xs gap-1 bg-white"
-                onClick={() => send("Is it true that you shouldn't exercise during your period?")}
-              >
-                <Scale className="w-3.5 h-3.5 text-emerald-600" />
-                Myth vs Fact
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={loading}
-                className="h-7 text-xs gap-1 bg-white"
-                onClick={() => send("I don't know what to ask")}
-              >
-                <MessageCircleQuestion className="w-3.5 h-3.5 text-indigo-500" />
-                Suggest a question
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={clearChat}
-                className="ml-auto h-7 w-7 text-slate-400 hover:text-red-600"
-                title="Clear chat"
-              >
-                <RotateCcw className="w-3.5 h-3.5" />
-              </Button>
-            </div>
-          )}
-
-          {/* Minimal Input Bar */}
-          <div className="bg-white border-2 border-slate-200 focus-within:border-emerald-600 rounded-2xl shadow-xs transition-all">
-            <div className="flex items-center px-4 py-2.5 gap-2">
-              <input
-                ref={inputRef}
-                autoFocus
-                type="text"
-                value={input}
-                onChange={e => setInput(e.target.value)}
-                onKeyDown={e => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    send();
-                  }
-                }}
-                placeholder={
-                  language === "hi" ? "यहाँ अपना स्वास्थ्य प्रश्न पूछें…" :
-                  language === "gu" ? "અહીં તમારો આરોગ્ય પ્રશ્ન પૂછો…" :
-                  "Ask any health question… (e.g. 'Why do periods hurt?')"
-                }
-                disabled={loading}
-                className="flex-1 bg-transparent text-sm text-slate-900 focus:outline-none placeholder:text-slate-400"
-              />
-              <Button
-                size="sm"
-                onClick={() => send()}
-                disabled={!input.trim() || loading}
-                className="h-8 w-8 p-0 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white shrink-0"
-              >
-                <Send className="w-3.5 h-3.5" />
-              </Button>
-            </div>
-
-            <div className="px-4 pb-2 flex items-center justify-between text-[11px] text-slate-400 border-t border-slate-50 pt-1.5">
-              <span>
-                {BRAND.name} — Private health awareness. Emergency: <strong className="text-slate-600">112 / 108</strong>
-              </span>
-              <button
-                onClick={() => setReportOpen(true)}
-                className="hover:text-emerald-700 font-medium flex items-center gap-1"
-              >
-                <FileText className="w-3 h-3" />
-                <span>Upload Report</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      </main>
-
-      {/* ──────── MODALS ──────── */}
+      {/* ── MODALS ── */}
       <HealthWordsModal
         word={selWord}
         onClose={() => setSelWord(null)}
-        onSelectRelated={t => send(`What does ${t} mean in simple terms?`)}
+        onSelectRelated={(t) =>
+          send(`What does ${t} mean in simple terms?`)
+        }
       />
       <QRCodeModal isOpen={isQROpen} onClose={() => setQROpen(false)} />
       <ReportUploadModal
         isOpen={isReportOpen}
         onClose={() => setReportOpen(false)}
-        onReportAnalyzed={(s, a) => send(`📄 Report summary:\n${s}${a ? `\n📅 Recommended next step: ${a}` : ""}`)}
+        onReportAnalyzed={(s, a, fullText) =>
+          send(
+            fullText || `📄 Report summary:\n${s}${a ? `\n📅 Possible appointment: ${a}` : ""}`
+          )
+        }
+        currentUser={currentUser}
+        userProfile={profile}
+        onUpdateProfile={async (updatedProfile) => {
+          setProfile(updatedProfile);
+          if (currentUser) {
+            await saveUserProfile(currentUser.id, updatedProfile, currentUser.email);
+          }
+        }}
       />
       <OnboardingModal
         isOpen={isOnboardOpen}
         onClose={() => setOnboardOpen(false)}
-        onComplete={async p => {
+        onComplete={async (p) => {
           setProfile(p);
           if (p.language) setLanguage(p.language);
           if (currentUser) {
@@ -783,10 +925,22 @@ export default function HomePage() {
         onClose={() => setAuthOpen(false)}
         currentUser={currentUser}
         userProfile={profile}
+        onLogout={async () => {
+          await signOutUser();
+          setCurrentUser(null);
+          setConversations([]);
+          setActiveConvId(null);
+          setMsgs([]);
+          localStorage.removeItem("wellup_chat");
+        }}
+        onOpenOnboarding={() => {
+          setAuthOpen(false);
+          setOnboardOpen(true);
+        }}
         onAuthSuccess={async (u, prof) => {
           setCurrentUser(u);
           if (prof) {
-            setProfile(prev => ({
+            setProfile((prev) => ({
               ...prev,
               nickname: prof.nickname || prev?.nickname || "",
               ageGroup: prof.ageRange || prev?.ageGroup || "",
@@ -807,26 +961,10 @@ export default function HomePage() {
               smokingStatus: prev?.smokingStatus || "",
               alcoholStatus: prev?.alcoholStatus || "",
               sittingTime: prev?.sittingTime || "",
-              language: prev?.language || "en",
+              language: prof.language || prev?.language || "en",
             }));
           }
-          // Load existing chats for this user from DB
-          const chats = await loadChatMessages(u.id);
-          if (chats && chats.length > 0) {
-            setMsgs(chats.map(c => ({
-              id: c.id,
-              role: c.role,
-              content: c.content,
-              category: c.category,
-              isEmergency: c.isEmergency,
-              ts: new Date(c.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-            })));
-          }
         }}
-        onLogout={() => {
-          setCurrentUser(null);
-        }}
-        onOpenOnboarding={() => setOnboardOpen(true)}
       />
     </div>
   );

@@ -11,6 +11,7 @@ export interface HealthProfile {
   ageGroup: string;
   overallHealth: string;
   allergies: string[];
+  conditions?: string[];
   longTermConditions: string;
   heartBpConcerns: string;
   familyHistory: string;
@@ -45,10 +46,10 @@ function SingleChoice({ options, value, onChange }: { options: string[]; value: 
       {options.map(o => (
         <button key={o} type="button"
           onClick={() => onChange(value === o ? "" : o)}
-          className={`px-3.5 py-2 rounded-xl text-sm border-2 font-medium transition-all ${
+          className={`px-3.5 py-2 rounded-xl text-sm border font-medium transition-all ${
             value === o
-              ? "bg-green-600 text-white border-green-600"
-              : "bg-white text-gray-700 border-gray-200 hover:border-green-400 hover:bg-green-50"
+              ? "bg-emerald-600 text-white border-emerald-600 shadow-sm"
+              : "bg-white dark:bg-[#222226] text-gray-700 dark:text-zinc-300 border-gray-200 dark:border-white/10 hover:border-emerald-500 dark:hover:border-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/30"
           }`}>
           {value === o && <Check className="inline w-3 h-3 mr-1" />}
           {o}
@@ -65,10 +66,10 @@ function MultiChoice({ options, values, onChange }: { options: string[]; values:
       {options.map(o => (
         <button key={o} type="button"
           onClick={() => toggle(o)}
-          className={`px-3.5 py-2 rounded-xl text-sm border-2 font-medium transition-all ${
+          className={`px-3.5 py-2 rounded-xl text-sm border font-medium transition-all ${
             values.includes(o)
-              ? "bg-green-600 text-white border-green-600"
-              : "bg-white text-gray-700 border-gray-200 hover:border-green-400 hover:bg-green-50"
+              ? "bg-emerald-600 text-white border-emerald-600 shadow-sm"
+              : "bg-white dark:bg-[#222226] text-gray-700 dark:text-zinc-300 border-gray-200 dark:border-white/10 hover:border-emerald-500 dark:hover:border-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/30"
           }`}>
           {values.includes(o) && <Check className="inline w-3 h-3 mr-1" />}
           {o}
@@ -121,31 +122,35 @@ export function OnboardingModal({ isOpen, onClose, onComplete }: Props) {
   const progress = ((step) / (STEPS.length - 1)) * 100;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6"
-      style={{ background: "rgba(0,0,0,0.5)", backdropFilter: "blur(8px)" }}>
-      <div className="w-full max-w-lg bg-white rounded-2xl shadow-2xl flex flex-col overflow-hidden"
-        style={{ maxHeight: "90vh" }}>
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-6"
+      style={{ background: "rgba(0,0,0,0.65)", backdropFilter: "blur(8px)" }}>
+      <div className="w-full max-w-lg bg-white dark:bg-[#18181b] border-t sm:border border-gray-200 dark:border-white/10 text-gray-900 dark:text-zinc-100 rounded-t-3xl sm:rounded-2xl shadow-2xl flex flex-col overflow-hidden max-h-[90vh]">
+        {/* Mobile drag handle */}
+        <div className="w-12 h-1.5 rounded-full bg-zinc-300 dark:bg-zinc-700 mx-auto mt-2.5 mb-1 sm:hidden shrink-0" />
 
         {/* ─── Progress Bar ─── */}
-        <div className="h-1 bg-gray-100">
-          <div className="h-full bg-green-500 transition-all duration-500 ease-out"
+        <div className="h-1 bg-gray-100 dark:bg-zinc-800">
+          <div className="h-full bg-emerald-500 transition-all duration-500 ease-out"
             style={{ width: `${progress}%` }} />
         </div>
 
         {/* ─── Header ─── */}
-        <div className="px-6 pt-5 pb-4 flex items-center justify-between border-b border-gray-100">
+        <div className="px-6 pt-5 pb-4 flex items-center justify-between border-b border-gray-100 dark:border-white/10">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-green-50 flex items-center justify-center text-green-700">
-              {STEPS[step].icon}
+            <div
+              className="relative w-9 h-9 rounded-xl flex items-center justify-center p-1.5 border border-emerald-500/25 shadow-sm shrink-0"
+              style={{ background: "radial-gradient(circle, #34d399 20%, #10b981 60%, #059669 100%)" }}
+            >
+              <img src="/favicon.svg" alt="WellUP" className="w-6 h-6 rounded-lg object-contain" />
             </div>
             <div>
-              <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 dark:text-zinc-500">
                 Step {step + 1} of {STEPS.length}
               </p>
-              <h3 className="text-base font-bold text-gray-900">{STEPS[step].title}</h3>
+              <h3 className="text-base font-bold text-gray-900 dark:text-white">{STEPS[step].title}</h3>
             </div>
           </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition-colors p-1">
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 dark:hover:text-white transition-colors p-1">
             <X className="w-5 h-5" />
           </button>
         </div>
@@ -156,35 +161,38 @@ export function OnboardingModal({ isOpen, onClose, onComplete }: Props) {
           {/* WELCOME */}
           {step === 0 && (
             <div className="space-y-4 text-center py-4">
-              <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-green-600 to-green-400 mx-auto flex items-center justify-center shadow-lg">
-                <Heart className="w-8 h-8 fill-white text-white" />
+              <div
+                className="relative w-16 h-16 rounded-2xl mx-auto flex items-center justify-center shadow-lg p-2.5 border border-white/20"
+                style={{ background: "radial-gradient(circle, #34d399 20%, #10b981 60%, #059669 100%)" }}
+              >
+                <img src="/favicon.svg" alt="WellUP" className="w-11 h-11 rounded-xl object-contain drop-shadow" />
               </div>
-              <h2 className="text-2xl font-extrabold text-gray-900">
+              <h2 className="text-2xl font-extrabold text-gray-900 dark:text-white">
                 Let's personalise your experience
               </h2>
-              <p className="text-sm text-gray-500 leading-relaxed max-w-sm mx-auto">
+              <p className="text-sm text-gray-500 dark:text-zinc-400 leading-relaxed max-w-sm mx-auto">
                 Answer a few optional questions so WellUP can give you more relevant health information.
                 You can skip any question you're not comfortable with.
               </p>
-              <div className="p-3.5 rounded-xl bg-green-50 border border-green-200 text-xs text-green-800 text-left">
+              <div className="p-3.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/50 text-xs text-emerald-800 dark:text-emerald-300 text-left">
                 <strong>🔒 Privacy first:</strong> Your answers stay on your device by default.
                 We'll ask about storage at the end — it's always your choice.
               </div>
               <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                <label className="block text-sm font-semibold text-gray-700 dark:text-zinc-300 mb-2">
                   What should we call you? (Optional)
                 </label>
                 <input type="text" value={p.nickname} onChange={e => set("nickname")(e.target.value)}
                   placeholder="e.g. Alex, Sam, Priya..."
-                  className="w-full px-4 py-2.5 rounded-xl border-2 border-gray-200 text-sm focus:outline-none focus:border-green-500 text-gray-900" />
+                  className="w-full px-4 py-2.5 rounded-xl border border-gray-200 dark:border-white/10 bg-white dark:bg-[#121214] text-sm focus:outline-none focus:border-emerald-500 text-gray-900 dark:text-white" />
               </div>
               <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">Preferred Language</label>
+                <label className="block text-sm font-semibold text-gray-700 dark:text-zinc-300 mb-2">Preferred Language</label>
                 <div className="flex gap-2 justify-center">
                   {[["en", "English"], ["hi", "हिन्दी"], ["gu", "ગુજરાતી"]].map(([code, label]) => (
                     <button key={code} type="button" onClick={() => set("language")(code)}
-                      className={`px-4 py-2 rounded-xl text-sm font-semibold border-2 transition-all ${
-                        p.language === code ? "bg-green-600 text-white border-green-600" : "bg-white text-gray-700 border-gray-200 hover:border-green-400"
+                      className={`px-4 py-2 rounded-xl text-sm font-semibold border transition-all ${
+                        p.language === code ? "bg-emerald-600 text-white border-emerald-600" : "bg-white dark:bg-[#222226] text-gray-700 dark:text-zinc-300 border-gray-200 dark:border-white/10 hover:border-emerald-400"
                       }`}>
                       {label}
                     </button>
@@ -427,26 +435,26 @@ export function OnboardingModal({ isOpen, onClose, onComplete }: Props) {
         </div>
 
         {/* ─── Footer Navigation ─── */}
-        <div className="px-6 py-4 border-t border-gray-100 flex items-center justify-between gap-3">
+        <div className="px-6 py-4 border-t border-gray-100 dark:border-white/10 flex items-center justify-between gap-3">
           {step > 0 ? (
             <button onClick={back}
-              className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-sm font-semibold text-gray-600 hover:bg-gray-100 transition-all border border-gray-200">
+              className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-sm font-semibold text-gray-600 dark:text-zinc-300 hover:bg-gray-100 dark:hover:bg-zinc-800 transition-all border border-gray-200 dark:border-white/10">
               <ChevronLeft className="w-4 h-4" /> Back
             </button>
           ) : (
-            <button onClick={onClose} className="px-4 py-2.5 rounded-xl text-sm text-gray-400 hover:text-gray-600">
+            <button onClick={onClose} className="px-4 py-2.5 rounded-xl text-sm text-gray-400 hover:text-gray-600 dark:hover:text-zinc-300">
               Skip for now
             </button>
           )}
 
           {step < STEPS.length - 1 ? (
             <button onClick={next}
-              className="flex items-center gap-1.5 px-5 py-2.5 rounded-xl text-sm font-bold text-white bg-green-600 hover:bg-green-700 transition-all shadow-sm">
+              className="flex items-center gap-1.5 px-5 py-2.5 rounded-xl text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 transition-all shadow-sm">
               {step === 0 ? "Let's start" : "Next"} <ChevronRight className="w-4 h-4" />
             </button>
           ) : (
             <button onClick={finish}
-              className="flex items-center gap-1.5 px-5 py-2.5 rounded-xl text-sm font-bold text-white bg-green-600 hover:bg-green-700 transition-all shadow-sm">
+              className="flex items-center gap-1.5 px-5 py-2.5 rounded-xl text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 transition-all shadow-sm">
               <Check className="w-4 h-4" /> All done!
             </button>
           )}

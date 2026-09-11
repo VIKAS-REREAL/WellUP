@@ -1,67 +1,100 @@
 "use client";
 
-import React, { useState } from "react";
-import { Palette, Check } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Moon, Sun } from "lucide-react";
 
-type ThemeId = "green" | "blue" | "purple";
+export function ThemeSelector({ className }: { className?: string }) {
+  const [isDark, setIsDark] = useState(true);
+  const [mounted, setMounted] = useState(false);
 
-const THEMES: { id: ThemeId; label: string; color: string }[] = [
-  { id: "green",  label: "Mint Sage",      color: "#5FB37B" },
-  { id: "blue",   label: "Ocean Breeze",   color: "#3B82F6" },
-  { id: "purple", label: "Royal Lavender", color: "#8B5CF6" },
-];
-
-function applyTheme(id: ThemeId) {
-  document.documentElement.classList.remove("theme-blue", "theme-purple");
-  if (id === "blue")   document.documentElement.classList.add("theme-blue");
-  if (id === "purple") document.documentElement.classList.add("theme-purple");
-  localStorage.setItem("wellup_theme", id);
-}
-
-export function ThemeSelector() {
-  const [current, setCurrent] = useState<ThemeId>(() => {
-    if (typeof window !== "undefined") {
-      const saved = localStorage.getItem("wellup_theme") as ThemeId;
-      if (saved) { applyTheme(saved); return saved; }
+  useEffect(() => {
+    setMounted(true);
+    try {
+      const saved = localStorage.getItem("wellup_theme_mode");
+      if (saved) {
+        const dark = saved === "dark";
+        setIsDark(dark);
+        applyTheme(dark, false);
+      } else {
+        // Default to dark mode as requested by user
+        setIsDark(true);
+        applyTheme(true, true);
+      }
+    } catch {
+      setIsDark(true);
+      applyTheme(true, false);
     }
-    return "green";
-  });
-  const [open, setOpen] = useState(false);
+  }, []);
 
-  const select = (id: ThemeId) => { applyTheme(id); setCurrent(id); setOpen(false); };
+  function applyTheme(dark: boolean, save = true) {
+    const root = document.documentElement;
+    if (dark) {
+      root.classList.add("dark");
+    } else {
+      root.classList.remove("dark");
+    }
+    // Remove obsolete color-theme classes if present
+    root.classList.remove("theme-ocean", "theme-clay", "theme-sage");
+
+    if (save) {
+      try {
+        localStorage.setItem("wellup_theme_mode", dark ? "dark" : "light");
+      } catch {}
+    }
+  }
+
+  function toggleTheme() {
+    const next = !isDark;
+    setIsDark(next);
+    applyTheme(next, true);
+  }
+
+  if (!mounted) {
+    return (
+      <div className={`w-full flex items-center justify-between px-3 py-2 rounded-xl bg-white/[0.04] text-zinc-400 text-xs ${className || ""}`}>
+        <span className="flex items-center gap-2">
+          <Moon className="w-4 h-4" />
+          <span>Dark mode</span>
+        </span>
+      </div>
+    );
+  }
 
   return (
-    <div className="relative">
-      <button onClick={() => setOpen(o => !o)}
-        className="flex items-center gap-1.5 h-8 px-3 rounded-xl text-xs font-semibold transition-all"
-        style={{ border: "1.5px solid var(--border)", background: "var(--surface)", color: "var(--muted)" }}>
-        <Palette className="w-3.5 h-3.5" style={{ color: "var(--primary)" }} />
-        <span className="hidden sm:inline">Theme</span>
-        <span className="w-2.5 h-2.5 rounded-full" style={{ background: THEMES.find(t => t.id === current)?.color }} />
-      </button>
+    <button
+      onClick={toggleTheme}
+      type="button"
+      className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl transition-all group ${
+        isDark
+          ? "bg-[#1c1c1f] hover:bg-[#232327] text-zinc-300 border border-white/[0.05]"
+          : "bg-black/[0.04] hover:bg-black/[0.07] text-zinc-700 border border-black/[0.06]"
+      } ${className || ""}`}
+      title={isDark ? "Switch to Light mode" : "Switch to Dark mode"}
+    >
+      <div className="flex items-center gap-2.5">
+        {isDark ? (
+          <Moon className="w-4 h-4 text-emerald-400 transition-transform group-hover:-rotate-12" />
+        ) : (
+          <Sun className="w-4 h-4 text-amber-500 transition-transform group-hover:rotate-45" />
+        )}
+        <span className="text-xs font-medium tracking-tight">
+          {isDark ? "Dark mode" : "Light mode"}
+        </span>
+      </div>
 
-      {open && (
-        <>
-          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 mt-2 w-44 p-1.5 rounded-xl z-50 animate-fadeIn"
-            style={{ background: "var(--surface)", border: "1.5px solid var(--border)", boxShadow: "var(--shadow-lg)" }}>
-            {THEMES.map(t => (
-              <button key={t.id} onClick={() => select(t.id)}
-                className="w-full flex items-center justify-between px-2.5 py-2 rounded-lg text-xs font-medium transition-all"
-                style={{
-                  color: current === t.id ? "var(--primary-dark)" : "var(--text)",
-                  background: current === t.id ? "var(--primary-light)" : "transparent",
-                }}>
-                <div className="flex items-center gap-2">
-                  <span className="w-3.5 h-3.5 rounded-full border" style={{ background: t.color, borderColor: "rgba(0,0,0,0.1)" }} />
-                  {t.label}
-                </div>
-                {current === t.id && <Check className="w-3 h-3" style={{ color: "var(--primary)" }} />}
-              </button>
-            ))}
-          </div>
-        </>
-      )}
-    </div>
+      {/* Pill Toggle Switch */}
+      <div
+        className={`w-8 h-4.5 rounded-full p-0.5 flex items-center transition-colors ${
+          isDark ? "bg-emerald-600 justify-end" : "bg-zinc-300 justify-start"
+        }`}
+        style={{ width: 34, height: 20 }}
+      >
+        <div
+          className="w-3.5 h-3.5 rounded-full bg-white shadow-sm transition-transform"
+          style={{ width: 14, height: 14 }}
+        />
+      </div>
+    </button>
   );
 }
+

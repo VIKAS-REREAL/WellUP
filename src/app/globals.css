@@ -1,0 +1,331 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ============================================================
+   WELLUP — GLOBAL CSS VARIABLE THEME SYSTEM
+   Never scatter hex values in components. All colors here.
+   ============================================================ */
+
+:root {
+  /* ── Green Mint (Default) ── */
+  --primary: #5FB37B;
+  --primary-dark: #246640;
+  --primary-light: #E8F8EE;
+  --primary-glow: rgba(95, 179, 123, 0.18);
+  --accent: #F4A261;
+  --accent-light: #FEF3E8;
+  --accent-glow: rgba(244, 162, 97, 0.15);
+  --background: #F2F9F4;
+  --surface: #FFFFFF;
+  --surface-2: #F7FAF8;
+  --text: #1A2E22;
+  --text-soft: #344A3C;
+  --muted: #6A7D72;
+  --border: #D4E8D9;
+  --border-strong: #B8D5BF;
+  --ring: rgba(95, 179, 123, 0.35);
+  --gradient-hero: linear-gradient(135deg, #E8F8EE 0%, #F2F9F4 50%, #FEF3E8 100%);
+  --gradient-card: linear-gradient(135deg, #FFFFFF 0%, #F7FAF8 100%);
+  --shadow-sm: 0 1px 3px rgba(26,46,34,0.06), 0 1px 2px rgba(26,46,34,0.04);
+  --shadow-md: 0 4px 16px rgba(26,46,34,0.08), 0 2px 6px rgba(26,46,34,0.04);
+  --shadow-lg: 0 10px 40px rgba(26,46,34,0.1), 0 4px 12px rgba(26,46,34,0.05);
+  --shadow-glow: 0 0 0 3px var(--ring);
+}
+
+.theme-blue {
+  --primary: #3B82F6;
+  --primary-dark: #1D4ED8;
+  --primary-light: #EFF6FF;
+  --primary-glow: rgba(59, 130, 246, 0.18);
+  --accent: #06B6D4;
+  --accent-light: #ECFEFF;
+  --accent-glow: rgba(6, 182, 212, 0.15);
+  --background: #F0F7FF;
+  --surface: #FFFFFF;
+  --surface-2: #F5F9FF;
+  --text: #0F1F3D;
+  --text-soft: #1E3A5F;
+  --muted: #5B7A9F;
+  --border: #C8DEFF;
+  --border-strong: #A8C8F8;
+  --ring: rgba(59, 130, 246, 0.3);
+  --gradient-hero: linear-gradient(135deg, #EFF6FF 0%, #F0F7FF 50%, #ECFEFF 100%);
+  --gradient-card: linear-gradient(135deg, #FFFFFF 0%, #F5F9FF 100%);
+  --shadow-sm: 0 1px 3px rgba(15,31,61,0.06), 0 1px 2px rgba(15,31,61,0.04);
+  --shadow-md: 0 4px 16px rgba(15,31,61,0.08), 0 2px 6px rgba(15,31,61,0.04);
+  --shadow-lg: 0 10px 40px rgba(15,31,61,0.1), 0 4px 12px rgba(15,31,61,0.05);
+  --shadow-glow: 0 0 0 3px var(--ring);
+}
+
+.theme-purple {
+  --primary: #8B5CF6;
+  --primary-dark: #6D28D9;
+  --primary-light: #F5F3FF;
+  --primary-glow: rgba(139, 92, 246, 0.18);
+  --accent: #EC4899;
+  --accent-light: #FDF2F8;
+  --accent-glow: rgba(236, 72, 153, 0.15);
+  --background: #F8F5FF;
+  --surface: #FFFFFF;
+  --surface-2: #FBF9FF;
+  --text: #1E0A3C;
+  --text-soft: #321A5C;
+  --muted: #7B6A9E;
+  --border: #E0D4FF;
+  --border-strong: #C8B4F8;
+  --ring: rgba(139, 92, 246, 0.3);
+  --gradient-hero: linear-gradient(135deg, #F5F3FF 0%, #F8F5FF 50%, #FDF2F8 100%);
+  --gradient-card: linear-gradient(135deg, #FFFFFF 0%, #FBF9FF 100%);
+  --shadow-sm: 0 1px 3px rgba(30,10,60,0.06), 0 1px 2px rgba(30,10,60,0.04);
+  --shadow-md: 0 4px 16px rgba(30,10,60,0.08), 0 2px 6px rgba(30,10,60,0.04);
+  --shadow-lg: 0 10px 40px rgba(30,10,60,0.1), 0 4px 12px rgba(30,10,60,0.05);
+  --shadow-glow: 0 0 0 3px var(--ring);
+}
+
+/* ============================================================
+   BASE RESET & TYPOGRAPHY
+   ============================================================ */
+*, *::before, *::after { box-sizing: border-box; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  background: var(--background);
+  color: var(--text);
+  font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+  margin: 0;
+  padding: 0;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+/* ============================================================
+   CUSTOM SCROLLBAR
+   ============================================================ */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 99px; }
+::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+
+/* ============================================================
+   KEYFRAME ANIMATIONS
+   ============================================================ */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes scaleUp {
+  from { opacity: 0; transform: scale(0.95) translateY(8px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+@keyframes slideInRight {
+  from { opacity: 0; transform: translateX(12px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes slideInLeft {
+  from { opacity: 0; transform: translateX(-12px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% center; }
+  100% { background-position: 200% center; }
+}
+
+@keyframes pulse-ring {
+  0% { transform: scale(0.95); box-shadow: 0 0 0 0 var(--primary-glow); }
+  70% { transform: scale(1); box-shadow: 0 0 0 8px transparent; }
+  100% { transform: scale(0.95); box-shadow: 0 0 0 0 transparent; }
+}
+
+@keyframes bounceTyping {
+  0%, 80%, 100% { transform: translateY(0); opacity: 0.4; }
+  40% { transform: translateY(-6px); opacity: 1; }
+}
+
+@keyframes gradientShift {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+}
+
+/* ============================================================
+   ANIMATION UTILITY CLASSES
+   ============================================================ */
+.animate-fadeIn    { animation: fadeIn 0.3s ease both; }
+.animate-scaleUp   { animation: scaleUp 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) both; }
+.animate-slideRight { animation: slideInRight 0.35s ease both; }
+.animate-slideLeft  { animation: slideInLeft 0.35s ease both; }
+
+/* Stagger helpers */
+.delay-75  { animation-delay: 75ms; }
+.delay-150 { animation-delay: 150ms; }
+.delay-225 { animation-delay: 225ms; }
+.delay-300 { animation-delay: 300ms; }
+
+/* ============================================================
+   TYPING INDICATOR DOTS
+   ============================================================ */
+.typing-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--primary);
+  animation: bounceTyping 1.2s infinite ease-in-out;
+}
+.typing-dot:nth-child(2) { animation-delay: 0.2s; }
+.typing-dot:nth-child(3) { animation-delay: 0.4s; }
+
+/* ============================================================
+   HEALTH WORD BADGE — SIGNATURE FEATURE
+   ============================================================ */
+.health-word-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--primary-light);
+  color: var(--primary-dark);
+  font-weight: 700;
+  font-size: 0.75rem;
+  padding: 3px 9px 3px 6px;
+  border-radius: 99px;
+  border: 1.5px solid var(--primary);
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+  white-space: nowrap;
+  vertical-align: middle;
+  position: relative;
+  top: -1px;
+}
+.health-word-tag:hover {
+  transform: translateY(-2px) scale(1.04);
+  box-shadow: 0 6px 20px var(--primary-glow);
+  background: var(--primary);
+  color: #fff;
+  border-color: var(--primary-dark);
+}
+.health-word-tag:active { transform: scale(0.97); }
+
+/* ============================================================
+   GRADIENT TEXT UTILITY
+   ============================================================ */
+.gradient-text {
+  background: linear-gradient(135deg, var(--primary-dark) 0%, var(--primary) 50%, var(--accent) 100%);
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-size: 200% 200%;
+  animation: gradientShift 4s ease infinite;
+}
+
+/* ============================================================
+   GLASS CARD UTILITY
+   ============================================================ */
+.glass-card {
+  background: rgba(255,255,255,0.75);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255,255,255,0.6);
+  box-shadow: var(--shadow-md);
+}
+
+/* ============================================================
+   MESSAGE BUBBLE BASE STYLES
+   ============================================================ */
+.msg-user {
+  background: linear-gradient(135deg, var(--primary-dark) 0%, var(--primary) 100%);
+  color: #fff;
+  border-radius: 20px 20px 4px 20px;
+  box-shadow: var(--shadow-md), 0 0 0 1px rgba(255,255,255,0.1) inset;
+}
+.msg-bot {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px 20px 20px 20px;
+  box-shadow: var(--shadow-sm);
+}
+.msg-emergency {
+  background: linear-gradient(135deg, #FFF1F1 0%, #FFF5F5 100%);
+  border: 2px solid #FCA5A5;
+  border-radius: 4px 20px 20px 20px;
+  box-shadow: 0 0 0 4px rgba(252, 165, 165, 0.15);
+}
+
+/* ============================================================
+   QUICK ACTION CHIP
+   ============================================================ */
+.quick-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 99px;
+  border: 1.5px solid var(--border);
+  background: var(--surface);
+  color: var(--text-soft);
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+.quick-chip:hover {
+  border-color: var(--primary);
+  color: var(--primary-dark);
+  background: var(--primary-light);
+  box-shadow: var(--shadow-sm);
+  transform: translateY(-1px);
+}
+.quick-chip:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* ============================================================
+   STARTER QUESTION CARD
+   ============================================================ */
+.starter-card {
+  background: var(--gradient-card);
+  border: 1.5px solid var(--border);
+  border-radius: 16px;
+  padding: 14px 16px;
+  cursor: pointer;
+  transition: all 0.25s cubic-bezier(0.34, 1.2, 0.64, 1);
+  text-align: left;
+  position: relative;
+  overflow: hidden;
+}
+.starter-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--primary-glow);
+  opacity: 0;
+  transition: opacity 0.25s ease;
+}
+.starter-card:hover {
+  border-color: var(--primary);
+  box-shadow: var(--shadow-md), 0 0 0 3px var(--primary-glow);
+  transform: translateY(-2px);
+}
+.starter-card:hover::before { opacity: 1; }
+.starter-card:active { transform: scale(0.98); }
+
+/* ============================================================
+   SMOOTH FOCUS RING
+   ============================================================ */
+input:focus-visible, button:focus-visible, textarea:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-glow);
+}
+
+/* ============================================================
+   THEME TRANSITION
+   ============================================================ */
+* { transition: border-color 0.2s ease, background-color 0.2s ease; }

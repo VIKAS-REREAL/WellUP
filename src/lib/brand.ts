@@ -1,78 +1,56 @@
-export interface BrandConfig {
-  name: string;
-  shortName: string;
-  tagline: string;
-  subtitle: string;
-  sdgGoal: string;
-  emergencyNumber: string;
-  emergencyNote: string;
-}
-
-// Easily switchable branding between WellUP and Carava
-export const BRAND: BrandConfig = {
+export const BRAND = {
   name: "WellUP",
   shortName: "WellUP",
-  tagline: "Understand your health without feeling awkward asking.",
-  subtitle: "A private, youth-friendly health awareness assistant built for SDG 3 (Good Health & Well-being).",
+  tagline: "Ask health questions without feeling awkward.",
+  subtitle: "Private, clear, and youth-friendly health education. Not a doctor — but a trusted guide.",
   sdgGoal: "SDG 3 — Good Health & Well-being",
   emergencyNumber: "112 / 108",
-  emergencyNote: "For acute emergencies (chest pain, severe bleeding, breathing difficulty), call 112 / 108 or go to the nearest emergency room immediately.",
 };
 
 export interface HealthCategory {
   id: string;
   name: string;
-  icon: string;
-  color: string;
-  description: string;
-  sampleQuestions: string[];
+  emoji: string;
+  questions: string[];
 }
 
 export const HEALTH_CATEGORIES: HealthCategory[] = [
   {
-    id: "puberty",
-    name: "Body & Puberty",
-    icon: "Sparkles",
-    color: "emerald",
-    description: "Physical, hormonal, and emotional changes during adolescence.",
-    sampleQuestions: [
-      "What changes happen during puberty?",
-      "Why is my voice cracking?",
-      "Is sudden acne normal during teenage years?",
+    id: "menstrual",
+    name: "Menstrual Health",
+    emoji: "🩸",
+    questions: [
+      "Why do periods hurt and what causes cramps?",
+      "What is the uterus and what does it do?",
+      "Is it safe to exercise during my period?",
     ],
   },
   {
-    id: "menstrual",
-    name: "Menstrual Health",
-    icon: "HeartPulse",
-    color: "rose",
-    description: "Periods, cramps, cycle tracking, and menstrual hygiene.",
-    sampleQuestions: [
-      "Why do periods hurt?",
-      "What is the uterus and how does menstruation work?",
-      "Is it safe to exercise during periods?",
+    id: "puberty",
+    name: "Body & Puberty",
+    emoji: "🌱",
+    questions: [
+      "What changes happen during puberty?",
+      "Why do teenagers get acne and how can I manage it?",
+      "Is it normal for my voice to change?",
     ],
   },
   {
     id: "allergies",
-    name: "Allergies & Immunity",
-    icon: "ShieldAlert",
-    color: "amber",
-    description: "Histamines, common allergens, symptoms, and when to seek testing.",
-    sampleQuestions: [
-      "What are common allergy triggers?",
-      "I have sudden itching and hives. What could it mean?",
-      "How do doctors test for food allergies?",
+    name: "Allergies",
+    emoji: "🤧",
+    questions: [
+      "I have itching and a rash — what could it mean?",
+      "What are the most common allergy triggers?",
+      "How do I know if I'm allergic to a food?",
     ],
   },
   {
     id: "nutrition",
-    name: "Nutrition & Lifestyle",
-    icon: "Apple",
-    color: "teal",
-    description: "Balanced diet, hydration, vitamins, and energy levels.",
-    sampleQuestions: [
-      "Why do I feel tired in the afternoon?",
+    name: "Nutrition",
+    emoji: "🥗",
+    questions: [
+      "I have trouble eating vegetables — how can I improve that?",
       "How much water should a teenager drink daily?",
       "What foods help reduce inflammation?",
     ],
@@ -80,72 +58,48 @@ export const HEALTH_CATEGORIES: HealthCategory[] = [
   {
     id: "mental",
     name: "Mental Well-being",
-    icon: "Smile",
-    color: "indigo",
-    description: "Exam stress, sleep hygiene, emotional balance, and mindfulness.",
-    sampleQuestions: [
-      "How can I manage exam anxiety?",
-      "Why is 8 hours of sleep important for adolescents?",
-      "What is the difference between stress and burnout?",
+    emoji: "🧠",
+    questions: [
+      "How can I manage exam stress and anxiety?",
+      "How many hours of sleep does a teenager need?",
+      "What is burnout and how do I recognise it?",
     ],
   },
   {
     id: "general",
     name: "General Health",
-    icon: "Stethoscope",
-    color: "sky",
-    description: "Everyday health terms, basic biology, and preventative habits.",
-    sampleQuestions: [
+    emoji: "💊",
+    questions: [
       "What does inflammation mean in simple words?",
-      "Why do we get fevers when sick?",
-      "What should I do if I feel dizzy after standing up quickly?",
+      "Is it true that you shouldn't exercise during your period?",
+      "Can you tell me whether a medicine is right for me?",
     ],
   },
 ];
 
-export interface ThemePreset {
-  id: string;
-  name: string;
-  primary: string;
-  primaryDark: string;
-  accent: string;
-  badge: string;
-}
-
-export const THEME_PRESETS: ThemePreset[] = [
-  {
-    id: "theme-green",
-    name: "Mint Sage (Default)",
-    primary: "#7CBF8A",
-    primaryDark: "#2F6B45",
-    accent: "#F4A261",
-    badge: "bg-emerald-500",
-  },
-  {
-    id: "theme-blue",
-    name: "Ocean Breeze",
-    primary: "#3B82F6",
-    primaryDark: "#1E40AF",
-    accent: "#06B6D4",
-    badge: "bg-blue-500",
-  },
-  {
-    id: "theme-purple",
-    name: "Royal Lavender",
-    primary: "#8B5CF6",
-    primaryDark: "#5B21B6",
-    accent: "#EC4899",
-    badge: "bg-purple-500",
-  },
+export const STARTER_QUESTIONS = [
+  "Why do periods hurt?",
+  "What changes happen during puberty?",
+  "I have trouble eating vegetables — how can I fix that?",
+  "What does inflammation mean?",
+  "Is it safe to exercise during my period?",
+  "I have itching — what could it mean?",
+  "How many hours of sleep do I need?",
+  "I don't know what to ask",
 ];
 
-export const STARTER_QUESTIONS = [
+export const DEMO_QUESTIONS = [
   "What happens during puberty?",
   "Why do periods hurt?",
   "What is the uterus?",
-  "Is it true that you shouldn't exercise during your period?",
   "I have itching. What could it mean?",
+  "I think I am allergic to something. What should I do?",
+  "Is it true that you shouldn't exercise during your period?",
+  "Can you diagnose me?",
+  "I have severe chest pain and difficulty breathing.",
   "What does inflammation mean?",
-  "What should I know about menstrual hygiene?",
   "I don't know what to ask",
+  "What should I know about menstrual hygiene?",
+  "What are common allergy triggers?",
+  "Can you tell me whether this medicine is right for me?",
 ];

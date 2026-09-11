@@ -2,10 +2,11 @@
 
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
-  Heart, Send, Sparkles, ShieldCheck, RotateCcw, BookOpen,
+  Send, Sparkles, RotateCcw,
   FileText, QrCode, Lock, ChevronRight, MessageCircleQuestion,
-  Lightbulb, Scale, Zap, AlertTriangle, Globe, X,
-  HeartPulse, Apple, SmilePlus, Activity, Leaf, FlaskConical
+  Lightbulb, Scale, AlertTriangle, User as UserIcon, Leaf,
+  HeartPulse, Apple, SmilePlus, Activity, FlaskConical, Info,
+  CheckCircle2, LogIn, Database
 } from "lucide-react";
 import { BRAND, HEALTH_CATEGORIES, STARTER_QUESTIONS } from "@/lib/brand";
 import { HealthWord } from "@/lib/gemini";
@@ -13,8 +14,24 @@ import { ThemeSelector } from "@/components/ThemeSelector";
 import { LanguageSelector } from "@/components/LanguageSelector";
 import { HealthWordsModal } from "@/components/HealthWordsModal";
 import { QRCodeModal } from "@/components/QRCodeModal";
-import { AuthModal } from "@/components/AuthModal";
 import { ReportUploadModal } from "@/components/ReportUploadModal";
+import { OnboardingModal, HealthProfile } from "@/components/OnboardingModal";
+import { AuthModal } from "@/components/AuthModal";
+import {
+  supabase,
+  getCurrentUser,
+  fetchUserProfile,
+  saveUserProfile,
+  saveChatMessage,
+  loadChatMessages,
+  UserHealthProfile,
+  isSupabaseConfigured,
+} from "@/lib/supabase";
+
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardContent } from "@/components/ui/card";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 
 /* ─── Types ─── */
 interface Message {
@@ -25,60 +42,63 @@ interface Message {
   healthWords?: HealthWord[];
   sources?: string[];
   isEmergency?: boolean;
-  timestamp: string;
+  ts: string;
 }
 
-/* ─── Category Icon Map ─── */
-const CATEGORY_ICONS: Record<string, React.ReactNode> = {
-  puberty:    <Sparkles className="w-3.5 h-3.5" />,
-  menstrual:  <HeartPulse className="w-3.5 h-3.5" />,
-  allergies:  <FlaskConical className="w-3.5 h-3.5" />,
-  nutrition:  <Apple className="w-3.5 h-3.5" />,
-  mental:     <SmilePlus className="w-3.5 h-3.5" />,
-  general:    <Activity className="w-3.5 h-3.5" />,
-};
-
-/* ─── Formatted message renderer ─── */
-function renderContent(content: string, healthWords: HealthWord[] = [], onWordClick: (w: HealthWord) => void) {
-  const paragraphs = content.split(/\n\n+/);
-
+/* ─── Inline text formatter (bold → health word badges) ─── */
+function InlineText({ text, words, onWord }: { text: string; words: HealthWord[]; onWord: (w: HealthWord) => void }) {
+  const parts = text.split(/(\*\*[^*]+\*\*)/g);
   return (
-    <div className="space-y-2.5 text-sm leading-relaxed">
-      {paragraphs.map((para, pi) => {
-        if (!para.trim()) return null;
-
-        // H3 headings
-        if (para.startsWith("### ")) {
+    <>
+      {parts.map((p, i) => {
+        if (p.startsWith("**") && p.endsWith("**")) {
+          const term = p.slice(2, -2).trim();
+          const match = words.find(w => w.term.toLowerCase() === term.toLowerCase());
           return (
-            <h4 key={pi} className="font-bold text-[var(--primary-dark)] text-[13px] pt-1 flex items-center gap-1.5 border-b border-[var(--border)] pb-1">
-              <Leaf className="w-3.5 h-3.5 text-[var(--primary)]" />
-              {para.replace("### ", "")}
-            </h4>
+            <button
+              key={i}
+              className="hw-tag mx-0.5 inline-flex items-center gap-1 font-semibold text-xs"
+              onClick={() => onWord(match || { term, definition: "A health or medical concept.", function: "", location: "", relatedTerms: [] })}
+            >
+              {term}
+            </button>
           );
         }
+        return <React.Fragment key={i}>{p}</React.Fragment>;
+      })}
+    </>
+  );
+}
 
-        // Bullet lists starting with "- "
-        const bulletLines = para.split("\n").filter(l => l.trim().startsWith("- "));
-        if (bulletLines.length > 0 && bulletLines.length === para.split("\n").filter(l => l.trim()).length) {
+/* ─── Clean, minimal message renderer ─── */
+function MsgContent({ text, words, onWord }: { text: string; words: HealthWord[]; onWord: (w: HealthWord) => void }) {
+  const blocks = text.split(/\n\n+/);
+  return (
+    <div className="text-sm leading-relaxed space-y-2 text-slate-800">
+      {blocks.map((block, bi) => {
+        if (!block.trim()) return null;
+        const lines = block.split("\n");
+        const isBulletList = lines.every(l => l.trim().startsWith("• ") || l.trim().startsWith("- ") || !l.trim());
+        if (isBulletList && lines.some(l => l.trim().startsWith("• ") || l.trim().startsWith("- "))) {
           return (
-            <ul key={pi} className="space-y-1 pl-2">
-              {bulletLines.map((line, li) => {
-                const text = line.replace(/^[-•]\s*/, "");
+            <ul key={bi} className="space-y-1.5 pl-1 my-1.5">
+              {lines.filter(l => l.trim().startsWith("• ") || l.trim().startsWith("- ")).map((line, li) => {
+                const cleanLine = line.replace(/^[•-]\s*/, "");
                 return (
-                  <li key={li} className="flex items-start gap-2">
-                    <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-[var(--primary)] flex-shrink-0" />
-                    <span>{inlineFormat(text, healthWords, onWordClick)}</span>
+                  <li key={li} className="flex items-start gap-2 text-sm">
+                    <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-emerald-600 shrink-0" />
+                    <span>
+                      <InlineText text={cleanLine} words={words} onWord={onWord} />
+                    </span>
                   </li>
                 );
               })}
             </ul>
           );
         }
-
-        // Normal paragraph with inline formatting
         return (
-          <p key={pi} className="text-[var(--text)]">
-            {inlineFormat(para, healthWords, onWordClick)}
+          <p key={bi}>
+            <InlineText text={block} words={words} onWord={onWord} />
           </p>
         );
       })}
@@ -86,500 +106,728 @@ function renderContent(content: string, healthWords: HealthWord[] = [], onWordCl
   );
 }
 
-function inlineFormat(text: string, healthWords: HealthWord[], onWordClick: (w: HealthWord) => void) {
-  // Split on **bold** patterns
-  const parts = text.split(/(\*\*[^*]+\*\*)/g);
-  return parts.map((part, i) => {
-    if (part.startsWith("**") && part.endsWith("**")) {
-      const word = part.slice(2, -2).trim();
-      const match = healthWords.find(hw => hw.term.toLowerCase() === word.toLowerCase());
-      const onClick = () => onWordClick(
-        match || {
-          term: word,
-          definition: "A relevant health or medical concept.",
-          function: "Involved in human physiology and well-being.",
-          location: "Human anatomy",
-          relatedTerms: ["Health", "Well-being"],
-        }
-      );
-      return (
-        <button key={i} onClick={onClick} className="health-word-tag mx-0.5">
-          <Sparkles className="w-2.5 h-2.5" />{word}
-        </button>
-      );
-    }
-    return <React.Fragment key={i}>{part}</React.Fragment>;
-  });
+/* ─── Build health context string from profile ─── */
+function buildHealthContext(profile: HealthProfile | null): string {
+  if (!profile) return "";
+  const parts: string[] = [];
+  if (profile.nickname)           parts.push(`Name: ${profile.nickname}`);
+  if (profile.ageGroup)           parts.push(`Age group: ${profile.ageGroup}`);
+  if (profile.overallHealth)      parts.push(`Overall health: ${profile.overallHealth}`);
+  if (profile.allergies?.length)  parts.push(`Allergies: ${profile.allergies.join(", ")}`);
+  if (profile.longTermConditions && profile.longTermConditions !== "No") parts.push(`Health conditions: ${profile.longTermConditions}`);
+  if (profile.sleepHours)         parts.push(`Sleep: ${profile.sleepHours} hours`);
+  if (profile.exerciseFrequency)  parts.push(`Exercise: ${profile.exerciseFrequency}`);
+  if (profile.goals?.length)      parts.push(`Health goals: ${profile.goals.join(", ")}`);
+  return parts.join(". ");
 }
 
 /* ─── Main Page ─── */
 export default function HomePage() {
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [input, setInput] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [language, setLanguage] = useState("en");
-  const [selectedWord, setSelectedWord] = useState<HealthWord | null>(null);
-  const [isQROpen, setIsQROpen] = useState(false);
-  const [isAuthOpen, setIsAuthOpen] = useState(false);
-  const [isReportOpen, setIsReportOpen] = useState(false);
-  const [userProfile, setUserProfile] = useState<any>(null);
+  const [msgs, setMsgs]                 = useState<Message[]>([]);
+  const [input, setInput]               = useState("");
+  const [loading, setLoading]           = useState(false);
+  const [language, setLanguage]         = useState("en");
+  const [profile, setProfile]           = useState<HealthProfile | null>(null);
+  const [selWord, setSelWord]           = useState<HealthWord | null>(null);
+  const [isQROpen, setQROpen]           = useState(false);
+  const [isReportOpen, setReportOpen]   = useState(false);
+  const [isOnboardOpen, setOnboardOpen] = useState(false);
+  const [isAuthOpen, setAuthOpen]       = useState(false);
+  const [currentUser, setCurrentUser]   = useState<any | null>(null);
+  const [apiWarn, setApiWarn]           = useState<string | null>(null);
+  const [dbStatus, setDbStatus]         = useState<"connected" | "offline">("connected");
 
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef  = useRef<HTMLInputElement>(null);
 
-  // Restore session from localStorage
+  /* ── 1. Check Supabase Auth & Restore Session ── */
   useEffect(() => {
+    // Local storage fallback restore
     try {
       const h = localStorage.getItem("wellup_chat");
-      if (h) setMessages(JSON.parse(h));
+      if (h) setMsgs(JSON.parse(h));
       const p = localStorage.getItem("wellup_profile");
-      if (p) setUserProfile(JSON.parse(p));
+      if (p) {
+        const parsed = JSON.parse(p) as HealthProfile;
+        setProfile(parsed);
+        if (parsed.language) setLanguage(parsed.language);
+      }
     } catch {}
+
+    // Check Supabase Auth
+    if (supabase) {
+      supabase.auth.getSession().then(async ({ data: { session } }) => {
+        if (session?.user) {
+          setCurrentUser(session.user);
+          // Sync profile from Supabase DB
+          const dbProfile = await fetchUserProfile(session.user.id);
+          if (dbProfile) {
+            setProfile(prev => ({
+              ...prev,
+              nickname: dbProfile.nickname || prev?.nickname || "",
+              ageGroup: dbProfile.ageRange || prev?.ageGroup || "",
+              allergies: dbProfile.allergies || prev?.allergies || [],
+              conditions: dbProfile.conditions || [],
+              storageConsent: true,
+              overallHealth: dbProfile.overallHealth || prev?.overallHealth || "",
+              sleepHours: dbProfile.sleepHours || prev?.sleepHours || "",
+              exerciseFrequency: dbProfile.exerciseFrequency || prev?.exerciseFrequency || "",
+              goals: dbProfile.goals || prev?.goals || [],
+              dietType: dbProfile.dietPreference || prev?.dietType || "",
+              longTermConditions: prev?.longTermConditions || "",
+              heartBpConcerns: prev?.heartBpConcerns || "",
+              familyHistory: prev?.familyHistory || "",
+              sleepQuality: prev?.sleepQuality || "",
+              exerciseTypes: prev?.exerciseTypes || [],
+              fruitsVeggiesFreq: prev?.fruitsVeggiesFreq || "",
+              waterIntake: prev?.waterIntake || "",
+              smokingStatus: prev?.smokingStatus || "",
+              alcoholStatus: prev?.alcoholStatus || "",
+              sittingTime: prev?.sittingTime || "",
+              language: dbProfile.language || prev?.language || "en",
+            }));
+          }
+          // Sync chat history from Supabase DB
+          const dbChats = await loadChatMessages(session.user.id);
+          if (dbChats && dbChats.length > 0) {
+            setMsgs(dbChats.map(c => ({
+              id: c.id,
+              role: c.role,
+              content: c.content,
+              category: c.category,
+              isEmergency: c.isEmergency,
+              ts: new Date(c.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+            })));
+          }
+        }
+      });
+
+      // Listen to auth changes
+      const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
+        if (session?.user) {
+          setCurrentUser(session.user);
+          const dbProfile = await fetchUserProfile(session.user.id);
+          if (dbProfile) {
+            setProfile(prev => ({
+              ...prev,
+              nickname: dbProfile.nickname || prev?.nickname || "",
+              ageGroup: dbProfile.ageRange || prev?.ageGroup || "",
+              allergies: dbProfile.allergies || prev?.allergies || [],
+              storageConsent: true,
+              overallHealth: dbProfile.overallHealth || prev?.overallHealth || "",
+              sleepHours: dbProfile.sleepHours || prev?.sleepHours || "",
+              exerciseFrequency: dbProfile.exerciseFrequency || prev?.exerciseFrequency || "",
+              goals: dbProfile.goals || prev?.goals || [],
+              dietType: dbProfile.dietPreference || prev?.dietType || "",
+              longTermConditions: prev?.longTermConditions || "",
+              heartBpConcerns: prev?.heartBpConcerns || "",
+              familyHistory: prev?.familyHistory || "",
+              sleepQuality: prev?.sleepQuality || "",
+              exerciseTypes: prev?.exerciseTypes || [],
+              fruitsVeggiesFreq: prev?.fruitsVeggiesFreq || "",
+              waterIntake: prev?.waterIntake || "",
+              smokingStatus: prev?.smokingStatus || "",
+              alcoholStatus: prev?.alcoholStatus || "",
+              sittingTime: prev?.sittingTime || "",
+              language: dbProfile.language || prev?.language || "en",
+            }));
+          }
+          const dbChats = await loadChatMessages(session.user.id);
+          if (dbChats && dbChats.length > 0) {
+            setMsgs(dbChats.map(c => ({
+              id: c.id,
+              role: c.role,
+              content: c.content,
+              category: c.category,
+              isEmergency: c.isEmergency,
+              ts: new Date(c.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+            })));
+          }
+        } else {
+          setCurrentUser(null);
+        }
+      });
+
+      return () => {
+        authListener.subscription.unsubscribe();
+      };
+    }
   }, []);
 
-  // Persist guest chat
+  /* Persist chat locally */
   useEffect(() => {
-    if (messages.length > 0) localStorage.setItem("wellup_chat", JSON.stringify(messages));
-  }, [messages]);
+    if (msgs.length) localStorage.setItem("wellup_chat", JSON.stringify(msgs));
+  }, [msgs]);
 
-  // Scroll to bottom
+  /* Auto-scroll */
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, loading]);
+  }, [msgs, loading]);
 
-  const sendMessage = useCallback(async (text?: string, opts?: { explainSimply?: boolean }) => {
-    const query = (text || input).trim();
-    if (!query || loading) return;
+  /* Send message */
+  const send = useCallback(async (text?: string, opts?: { explainSimply?: boolean }) => {
+    const q = (text ?? input).trim();
+    if (!q || loading) return;
     if (!text) setInput("");
 
+    const nowTs = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
     const userMsg: Message = {
       id: `u${Date.now()}`,
       role: "user",
-      content: query,
-      timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      content: q,
+      ts: nowTs,
     };
-    setMessages(prev => [...prev, userMsg]);
+    setMsgs(prev => [...prev, userMsg]);
     setLoading(true);
+
+    // Save to Supabase if logged in
+    if (currentUser) {
+      saveChatMessage(currentUser.id, { role: "user", content: q });
+    }
 
     try {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          message: query,
+          message: q,
           language,
-          explainSimply: opts?.explainSimply,
-          history: messages.slice(-8).map(m => ({
+          explainSimply: opts?.explainSimply ?? false,
+          userHealthContext: buildHealthContext(profile),
+          history: msgs.slice(-8).map(m => ({
             role: m.role === "assistant" ? "model" : "user",
             parts: m.content,
           })),
         }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Server error");
+      if (!res.ok) throw new Error(data.error);
+      if (data.apiKeyWarning) setApiWarn(data.apiKeyWarning);
 
-      setMessages(prev => [...prev, {
+      const botMsg: Message = {
         id: `a${Date.now()}`,
         role: "assistant",
-        content: data.response || "I couldn't generate a response.",
+        content: data.response || "No response received.",
         category: data.category,
         healthWords: data.healthWords || [],
         sources: data.sources || [],
         isEmergency: Boolean(data.isEmergency),
-        timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-      }]);
-    } catch (err: any) {
-      setMessages(prev => [...prev, {
+        ts: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      };
+      setMsgs(prev => [...prev, botMsg]);
+
+      // Save bot reply to Supabase if logged in
+      if (currentUser) {
+        saveChatMessage(currentUser.id, {
+          role: "assistant",
+          content: botMsg.content,
+          category: botMsg.category,
+          isEmergency: botMsg.isEmergency,
+        });
+      }
+    } catch {
+      setMsgs(prev => [...prev, {
         id: `e${Date.now()}`,
         role: "assistant",
-        content: "⚠️ I had a brief connection issue. Please try again — your privacy is maintained.",
-        timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+        content: "⚠️ Connection issue. Please try again.",
+        ts: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
       }]);
     } finally {
       setLoading(false);
-      inputRef.current?.focus();
+      setTimeout(() => inputRef.current?.focus(), 50);
     }
-  }, [input, language, loading, messages]);
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }
-  };
+  }, [input, language, loading, msgs, profile, currentUser]);
 
   const clearChat = () => {
-    if (messages.length === 0) return;
-    setMessages([]);
-    localStorage.removeItem("wellup_chat");
+    if (!msgs.length) return;
+    if (confirm("Clear your private chat history?")) {
+      setMsgs([]);
+      localStorage.removeItem("wellup_chat");
+    }
   };
 
-  const hasChat = messages.length > 0;
+  const hasChat = msgs.length > 0;
+  const userInitials = (profile?.nickname || currentUser?.email || "U").slice(0, 2).toUpperCase();
 
   return (
-    <div className="min-h-screen flex flex-col" style={{ background: "var(--background)" }}>
+    <div className="min-h-screen flex flex-col bg-slate-50/50">
 
-      {/* ── NAVBAR ─────────────────────────────────────────── */}
-      <header className="sticky top-0 z-40 border-b" style={{
-        background: "rgba(255,255,255,0.85)",
-        backdropFilter: "blur(16px)",
-        WebkitBackdropFilter: "blur(16px)",
-        borderColor: "var(--border)",
-        boxShadow: "var(--shadow-sm)",
-      }}>
-        <div className="max-w-5xl mx-auto px-4 h-14 flex items-center justify-between gap-3">
-          {/* Logo */}
+      {/* ──────── NAVBAR ──────── */}
+      <header className="sticky top-0 z-40 border-b border-border bg-white/95 backdrop-blur-md">
+        <div className="max-w-4xl mx-auto px-4 h-14 flex items-center justify-between gap-3">
+
+          {/* Logo & Favicon */}
           <div className="flex items-center gap-2.5">
-            <div className="relative">
-              <div className="w-9 h-9 rounded-xl flex items-center justify-center"
-                style={{ background: "linear-gradient(135deg, var(--primary-dark), var(--primary))", boxShadow: "var(--shadow-md)" }}>
-                <Heart className="w-5 h-5 fill-white text-white" />
-              </div>
-              <span className="absolute -top-1 -right-1 w-3 h-3 rounded-full border-2 border-white bg-emerald-400 animate-pulse" />
-            </div>
-            <div className="leading-none">
-              <div className="flex items-baseline gap-2">
-                <span className="text-base font-extrabold tracking-tight" style={{ color: "var(--text)" }}>
-                  {BRAND.name}
-                </span>
-                <span className="hidden sm:inline text-[10px] font-bold px-2 py-0.5 rounded-full"
-                  style={{ background: "var(--primary-light)", color: "var(--primary-dark)", border: "1px solid var(--border)" }}>
-                  SDG 3
-                </span>
-              </div>
-              <p className="text-[10px] hidden sm:block" style={{ color: "var(--muted)" }}>
-                Health Awareness · Private · Not a Doctor
-              </p>
+            <img
+              src="/favicon.svg"
+              alt="WellUP Logo"
+              className="w-8 h-8 rounded-lg shadow-sm border border-emerald-100"
+            />
+            <div>
+              <span className="font-extrabold text-base tracking-tight text-slate-900">
+                {BRAND.name}
+              </span>
+              <Badge variant="secondary" className="ml-1.5 text-[10px] bg-emerald-50 text-emerald-700 border-emerald-200 py-0 px-1.5 font-bold">
+                SDG 3
+              </Badge>
             </div>
           </div>
 
-          {/* Controls */}
-          <div className="flex items-center gap-2">
-            <LanguageSelector language={language} onChange={setLanguage} />
+          {/* Controls with real shadcn components */}
+          <div className="flex items-center gap-1.5">
+            <LanguageSelector
+              language={language}
+              onChange={l => {
+                setLanguage(l);
+                if (profile) setProfile({ ...profile, language: l });
+              }}
+            />
             <ThemeSelector />
-            <button onClick={() => setIsQROpen(true)}
-              className="p-2 rounded-xl transition-all hover:scale-105"
-              style={{ border: "1.5px solid var(--border)", background: "var(--surface)", color: "var(--muted)" }}
-              title="QR Code for judges">
-              <QrCode className="w-4 h-4" style={{ color: "var(--primary)" }} />
-            </button>
-            <button onClick={() => setIsAuthOpen(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all"
-              style={{
-                background: userProfile?.storageConsent ? "var(--primary)" : "var(--surface)",
-                color: userProfile?.storageConsent ? "#fff" : "var(--muted)",
-                border: `1.5px solid ${userProfile?.storageConsent ? "var(--primary)" : "var(--border)"}`,
-              }}>
-              <Lock className="w-3 h-3" />
-              <span className="hidden sm:inline">{userProfile?.nickname || "Guest"}</span>
-            </button>
+
+            {/* Auth / Account Button */}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setAuthOpen(true)}
+              className="h-8 gap-1.5 text-xs font-semibold border-border hover:bg-slate-100"
+              title={currentUser ? "View account & Supabase DB sync" : "Sign in / Save health profile"}
+            >
+              {currentUser ? (
+                <>
+                  <Avatar className="w-5 h-5">
+                    <AvatarFallback className="text-[10px] bg-emerald-600 text-white font-bold">
+                      {userInitials}
+                    </AvatarFallback>
+                  </Avatar>
+                  <span className="hidden sm:inline">{profile?.nickname || currentUser.email?.split("@")[0]}</span>
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" title="Connected to Supabase DB" />
+                </>
+              ) : (
+                <>
+                  <LogIn className="w-3.5 h-3.5 text-emerald-600" />
+                  <span className="hidden sm:inline">Sign In</span>
+                </>
+              )}
+            </Button>
+
+            {/* Onboarding Health Profile */}
+            <Button
+              variant={profile ? "secondary" : "outline"}
+              size="sm"
+              onClick={() => setOnboardOpen(true)}
+              className="h-8 gap-1.5 text-xs font-semibold"
+              title="Health Profile & Onboarding"
+            >
+              <UserIcon className="w-3.5 h-3.5 text-emerald-600" />
+              <span className="hidden md:inline">{profile ? "Health Profile ✓" : "Profile"}</span>
+            </Button>
+
+            {/* QR Modal */}
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={() => setQROpen(true)}
+              className="w-8 h-8 rounded-lg"
+              title="QR Code for judges & mobile test"
+            >
+              <QrCode className="w-3.5 h-3.5 text-slate-600" />
+            </Button>
           </div>
         </div>
       </header>
 
-      {/* ── MAIN CONTENT ────────────────────────────────────── */}
-      <main className="flex-1 flex flex-col max-w-5xl w-full mx-auto px-4 py-4 gap-3">
+      {/* ──────── MAIN ──────── */}
+      <main className="flex-1 max-w-4xl w-full mx-auto px-4 py-3 flex flex-col gap-3">
 
-        {/* Safety Notice */}
-        <div className="flex items-center justify-between gap-3 px-4 py-2.5 rounded-2xl"
-          style={{ background: "var(--primary-light)", border: "1px solid var(--border)" }}>
-          <div className="flex items-center gap-2.5 min-w-0">
-            <ShieldCheck className="w-4 h-4 flex-shrink-0" style={{ color: "var(--primary-dark)" }} />
-            <p className="text-[11px] font-medium leading-tight" style={{ color: "var(--primary-dark)" }}>
-              <strong>Private Guest Mode</strong> — No account needed. Educational AI only, not a doctor.
-              Emergencies: call <strong>112 / 108</strong>.
-            </p>
+        {/* API Key Notice Banner if not configured */}
+        {apiWarn && (
+          <div className="flex items-start gap-2.5 p-3 rounded-xl text-xs bg-amber-50 border border-amber-200 text-amber-900 anim-fadeUp">
+            <Info className="w-4 h-4 mt-0.5 shrink-0 text-amber-600" />
+            <div className="flex-1">
+              <strong>Notice:</strong> {apiWarn}. Educational fallback engine is active and ready.
+            </div>
+            <button onClick={() => setApiWarn(null)} className="font-bold text-amber-700 hover:text-amber-900">✕</button>
           </div>
-          <button onClick={() => setIsReportOpen(true)}
-            className="flex-shrink-0 flex items-center gap-1 text-[11px] font-semibold px-3 py-1.5 rounded-xl transition-all"
-            style={{ background: "var(--primary-dark)", color: "#fff" }}>
-            <FileText className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Upload Report</span>
-          </button>
+        )}
+
+        {/* Minimal Safe Status Bar */}
+        <div className="flex items-center justify-between gap-3 px-3.5 py-2 rounded-xl text-xs bg-emerald-50/70 border border-emerald-100">
+          <div className="flex items-center gap-2 text-emerald-900">
+            <Lock className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+            <span>
+              {currentUser ? (
+                <>
+                  Logged in as <strong>{currentUser.email}</strong> • Synced with Supabase DB
+                </>
+              ) : (
+                <>
+                  <strong>Private Mode:</strong> 100% confidential. Education only, not medical diagnosis.
+                </>
+              )}
+            </span>
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setReportOpen(true)}
+            className="h-6 px-2 text-xs font-semibold text-emerald-700 hover:bg-emerald-100 gap-1"
+          >
+            <FileText className="w-3 h-3" />
+            <span className="hidden sm:inline">Analyze Report</span>
+          </Button>
         </div>
 
-        {/* ── MESSAGES AREA ─────────────────────────────────── */}
-        <div className="flex-1 flex flex-col gap-4 pb-2 overflow-y-auto" style={{ minHeight: 0 }}>
+        {/* ──────── MESSAGES / EMPTY STATE ──────── */}
+        <div className="flex-1 flex flex-col gap-3 overflow-y-auto pb-2" style={{ minHeight: 0 }}>
 
-          {/* EMPTY STATE */}
-          {!hasChat && (
-            <div className="flex-1 py-6 flex flex-col gap-8 animate-fadeIn">
+          {!hasChat ? (
+            /* ── EMPTY STATE ── */
+            <div className="flex-1 flex flex-col gap-6 py-4 anim-fadeUp">
 
-              {/* Hero */}
-              <div className="text-center space-y-3 max-w-lg mx-auto">
-                <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full text-xs font-bold mb-2"
-                  style={{ background: "var(--primary-light)", color: "var(--primary-dark)", border: "1.5px solid var(--border)" }}>
-                  <Sparkles className="w-3.5 h-3.5" />
-                  SDG 3 — Good Health & Well-being
-                </div>
-                <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight leading-tight gradient-text">
+              {/* Minimal Hero */}
+              <div className="text-center max-w-md mx-auto space-y-2.5">
+                <img
+                  src="/favicon.svg"
+                  alt="WellUP"
+                  className="w-12 h-12 rounded-xl mx-auto shadow-sm border border-emerald-100"
+                />
+                <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900">
                   {BRAND.tagline}
                 </h1>
-                <p className="text-sm leading-relaxed" style={{ color: "var(--muted)" }}>
-                  Ask anything about your body, health, or medical terms — privately, clearly, and without judgment.
-                  Your question stays in your browser.
+                <p className="text-xs sm:text-sm text-slate-600 leading-relaxed">
+                  Ask clear, honest health questions about your body, nutrition, puberty, periods, sleep, or stress. No judgment.
                 </p>
+
+                {!currentUser && (
+                  <div className="pt-1 flex items-center justify-center gap-2">
+                    <Button
+                      size="sm"
+                      onClick={() => setAuthOpen(true)}
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs h-8 px-3 gap-1.5"
+                    >
+                      <Database className="w-3.5 h-3.5" />
+                      Sign In & Save History
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setOnboardOpen(true)}
+                      className="text-xs h-8 px-3"
+                    >
+                      Set Health Profile
+                    </Button>
+                  </div>
+                )}
               </div>
 
-              {/* Category Grid */}
-              <div>
-                <p className="text-[11px] font-bold uppercase tracking-widest mb-3 text-center" style={{ color: "var(--muted)" }}>
-                  Explore Health Topics
+              {/* Category Cards using shadcn Card */}
+              <div className="max-w-2xl mx-auto w-full">
+                <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-2.5">
+                  Explore Topics
                 </p>
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 max-w-2xl mx-auto">
-                  {HEALTH_CATEGORIES.map((cat, i) => (
-                    <button key={cat.id}
-                      onClick={() => sendMessage(cat.sampleQuestions[0])}
-                      className="starter-card animate-fadeIn"
-                      style={{ animationDelay: `${i * 50}ms` }}>
-                      <div className="relative z-10">
-                        <div className="flex items-center justify-between mb-1.5">
-                          <div className="w-7 h-7 rounded-lg flex items-center justify-center"
-                            style={{ background: "var(--primary-light)", color: "var(--primary-dark)" }}>
-                            {CATEGORY_ICONS[cat.id] || <Activity className="w-3.5 h-3.5" />}
-                          </div>
-                          <ChevronRight className="w-3.5 h-3.5" style={{ color: "var(--muted)" }} />
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                  {HEALTH_CATEGORIES.map(cat => (
+                    <Card
+                      key={cat.id}
+                      onClick={() => send(cat.questions[0])}
+                      className="cursor-pointer hover:border-emerald-500 hover:shadow-sm transition-all group border-border bg-white"
+                    >
+                      <CardContent className="p-3 space-y-1">
+                        <div className="flex items-center justify-between">
+                          <span className="text-lg">{cat.emoji}</span>
+                          <ChevronRight className="w-3.5 h-3.5 text-slate-400 group-hover:text-emerald-600 transition-colors" />
                         </div>
-                        <p className="text-xs font-bold leading-tight" style={{ color: "var(--text)" }}>{cat.name}</p>
-                        <p className="text-[11px] mt-0.5 line-clamp-2" style={{ color: "var(--muted)" }}>{cat.description}</p>
-                      </div>
-                    </button>
+                        <p className="font-bold text-xs text-slate-800">{cat.name}</p>
+                        <p className="text-[11px] text-slate-500 line-clamp-1">{cat.questions[0]}</p>
+                      </CardContent>
+                    </Card>
                   ))}
                 </div>
               </div>
 
               {/* Quick Starters */}
-              <div className="max-w-2xl mx-auto w-full">
-                <p className="text-[11px] font-bold uppercase tracking-widest mb-3 text-center" style={{ color: "var(--muted)" }}>
-                  Try Asking
+              <div className="max-w-xl mx-auto w-full">
+                <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-2">
+                  Popular Questions
                 </p>
-                <div className="flex flex-wrap justify-center gap-2">
+                <div className="flex flex-wrap gap-1.5">
                   {STARTER_QUESTIONS.map((q, i) => (
-                    <button key={i} onClick={() => sendMessage(q)}
-                      className="quick-chip animate-fadeIn"
-                      style={{ animationDelay: `${i * 40}ms` }}>
+                    <Button
+                      key={i}
+                      variant="outline"
+                      size="sm"
+                      onClick={() => send(q)}
+                      className="text-xs h-7 px-2.5 bg-white text-slate-700 hover:border-emerald-500 hover:text-emerald-700"
+                    >
                       {q}
-                    </button>
+                    </Button>
                   ))}
                 </div>
               </div>
             </div>
-          )}
+          ) : (
+            /* ── ACTIVE CHAT: CLEAN, NORMAL, MINIMAL MESSAGES ── */
+            <>
+              {msgs.map(msg => (
+                <div
+                  key={msg.id}
+                  className={`flex gap-2.5 ${msg.role === "user" ? "justify-end" : "justify-start"}`}
+                >
+                  {/* Bot Logo Avatar */}
+                  {msg.role === "assistant" && (
+                    <img
+                      src="/favicon.svg"
+                      alt="WellUP"
+                      className="w-7 h-7 rounded-lg shrink-0 mt-0.5 border border-emerald-100 shadow-2xs"
+                    />
+                  )}
 
-          {/* MESSAGES */}
-          {hasChat && messages.map((msg, idx) => (
-            <div
-              key={msg.id}
-              className={`flex gap-3 ${msg.role === "user" ? "justify-end animate-slideRight" : "justify-start animate-slideLeft"}`}
-            >
-              {/* Bot avatar */}
-              {msg.role === "assistant" && (
-                <div className="w-8 h-8 rounded-xl flex-shrink-0 mt-0.5 flex items-center justify-center"
-                  style={{ background: "linear-gradient(135deg, var(--primary-dark), var(--primary))", boxShadow: "var(--shadow-sm)" }}>
-                  <Heart className="w-4 h-4 fill-white text-white" />
-                </div>
-              )}
+                  <div
+                    className={`max-w-[85%] sm:max-w-[78%] px-4 py-3 rounded-2xl ${
+                      msg.role === "user"
+                        ? "bg-emerald-600 text-white rounded-tr-xs"
+                        : msg.isEmergency
+                        ? "bg-rose-50 border border-rose-200 rounded-tl-xs shadow-xs"
+                        : "bg-white border border-slate-200 rounded-tl-xs shadow-2xs"
+                    }`}
+                  >
+                    {/* Emergency Alert */}
+                    {msg.isEmergency && (
+                      <div className="flex items-center gap-2 mb-2 px-2.5 py-1.5 rounded-lg bg-rose-100/70 border border-rose-300">
+                        <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                        <span className="text-xs font-bold text-rose-800">
+                          Emergency assistance: Call 112 or 108 immediately
+                        </span>
+                      </div>
+                    )}
 
-              <div className={`max-w-[82%] sm:max-w-[75%] p-4 ${
-                msg.role === "user" ? "msg-user" :
-                msg.isEmergency ? "msg-emergency" :
-                "msg-bot"
-              }`}>
-                {/* Category + timestamp */}
-                {msg.role === "assistant" && msg.category && (
-                  <div className="flex items-center justify-between mb-2 pb-2" style={{ borderBottom: "1px solid var(--border)" }}>
-                    <span className="text-[10px] font-black uppercase tracking-widest" style={{ color: "var(--primary-dark)" }}>
-                      {msg.category}
-                    </span>
-                    <span className="text-[10px]" style={{ color: "var(--muted)" }}>{msg.timestamp}</span>
-                  </div>
-                )}
+                    {/* Clean Message Content */}
+                    {msg.role === "user" ? (
+                      <p className="text-sm font-medium text-white">{msg.content}</p>
+                    ) : (
+                      <MsgContent
+                        text={msg.content}
+                        words={msg.healthWords || []}
+                        onWord={setSelWord}
+                      />
+                    )}
 
-                {/* Emergency header */}
-                {msg.isEmergency && (
-                  <div className="flex items-center gap-2 mb-2 p-2 rounded-lg bg-red-100 border border-red-200">
-                    <AlertTriangle className="w-4 h-4 text-red-600 flex-shrink-0" />
-                    <span className="text-xs font-bold text-red-700">URGENT — Seek immediate medical attention</span>
-                  </div>
-                )}
+                    {/* Subtle Health Words if any */}
+                    {msg.role === "assistant" && msg.healthWords && msg.healthWords.length > 0 && (
+                      <div className="mt-2.5 pt-2 border-t border-slate-100 flex flex-wrap items-center gap-1.5 text-[11px]">
+                        <span className="text-slate-400 font-medium text-[10px]">Explore terms:</span>
+                        {msg.healthWords.map((hw, i) => (
+                          <button
+                            key={i}
+                            onClick={() => setSelWord(hw)}
+                            className="hw-tag text-[11px]"
+                          >
+                            <Sparkles className="w-2.5 h-2.5 mr-0.5" />
+                            {hw.term}
+                          </button>
+                        ))}
+                      </div>
+                    )}
 
-                {/* Content */}
-                {msg.role === "user"
-                  ? <p className="text-sm font-medium">{msg.content}</p>
-                  : renderContent(msg.content, msg.healthWords || [], setSelectedWord)
-                }
-
-                {/* Health Words footer */}
-                {msg.role === "assistant" && msg.healthWords && msg.healthWords.length > 0 && (
-                  <div className="mt-3 pt-3" style={{ borderTop: "1px solid var(--border)" }}>
-                    <p className="text-[10px] font-black uppercase tracking-widest mb-1.5 flex items-center gap-1" style={{ color: "var(--muted)" }}>
-                      <BookOpen className="w-3 h-3" style={{ color: "var(--primary)" }} />
-                      Health Words — Click to explore:
-                    </p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {msg.healthWords.map((hw, i) => (
-                        <button key={i} onClick={() => setSelectedWord(hw)} className="health-word-tag">
-                          <Sparkles className="w-2.5 h-2.5" />{hw.term}
-                        </button>
-                      ))}
+                    {/* Subtle bottom info: Category + Timestamp */}
+                    <div className="mt-1.5 flex items-center justify-between text-[10px] text-slate-400">
+                      {msg.role === "assistant" && msg.category ? (
+                        <span className="font-semibold text-emerald-700/80">{msg.category}</span>
+                      ) : <span />}
+                      <span className={msg.role === "user" ? "text-emerald-100 ml-auto" : ""}>{msg.ts}</span>
                     </div>
                   </div>
-                )}
+                </div>
+              ))}
 
-                {/* Sources */}
-                {msg.role === "assistant" && msg.sources && msg.sources.length > 0 && (
-                  <div className="mt-2 flex items-center gap-1 text-[10px]" style={{ color: "var(--muted)" }}>
-                    <ShieldCheck className="w-3 h-3" style={{ color: "var(--primary)" }} />
-                    {msg.sources.join(" • ")}
+              {/* Minimal Thinking Indicator */}
+              {loading && (
+                <div className="flex gap-2.5 justify-start items-center">
+                  <img src="/favicon.svg" alt="WellUP" className="w-7 h-7 rounded-lg border border-emerald-100" />
+                  <div className="bg-white border border-slate-200 px-3.5 py-2.5 rounded-2xl rounded-tl-xs flex items-center gap-1.5 shadow-2xs">
+                    <div className="dot" /><div className="dot" /><div className="dot" />
+                    <span className="text-xs text-slate-400 ml-1">Thinking…</span>
                   </div>
-                )}
-
-                {/* User timestamp */}
-                {msg.role === "user" && (
-                  <p className="text-[10px] mt-1.5 text-right opacity-70">{msg.timestamp}</p>
-                )}
-              </div>
-            </div>
-          ))}
-
-          {/* Typing indicator */}
-          {loading && (
-            <div className="flex gap-3 justify-start animate-fadeIn">
-              <div className="w-8 h-8 rounded-xl flex-shrink-0 flex items-center justify-center"
-                style={{ background: "linear-gradient(135deg, var(--primary-dark), var(--primary))" }}>
-                <Heart className="w-4 h-4 fill-white text-white" />
-              </div>
-              <div className="msg-bot px-5 py-3.5 flex items-center gap-1.5">
-                <div className="typing-dot" />
-                <div className="typing-dot" />
-                <div className="typing-dot" />
-                <span className="text-xs ml-1" style={{ color: "var(--muted)" }}>Thinking...</span>
-              </div>
-            </div>
+                </div>
+              )}
+              <div ref={bottomRef} />
+            </>
           )}
-
-          <div ref={bottomRef} />
         </div>
 
-        {/* ── TOOLBAR + INPUT AREA ────────────────────────── */}
+        {/* ──────── QUICK ACTIONS + MINIMAL INPUT BAR ──────── */}
         <div className="flex flex-col gap-2 pt-1">
 
-          {/* Quick Actions */}
+          {/* Quick action buttons */}
           {hasChat && (
-            <div className="flex items-center justify-between gap-2 overflow-x-auto py-0.5">
-              <div className="flex gap-1.5">
-                <button onClick={() => {
-                  const last = [...messages].reverse().find(m => m.role === "user");
-                  if (last) sendMessage(last.content, { explainSimply: true });
-                }} disabled={loading} className="quick-chip">
-                  <Lightbulb className="w-3.5 h-3.5" style={{ color: "#F59E0B" }} />
-                  Explain Simply
-                </button>
-                <button onClick={() => sendMessage("Is it true that you shouldn't exercise during your period?")}
-                  disabled={loading} className="quick-chip">
-                  <Scale className="w-3.5 h-3.5" style={{ color: "var(--primary)" }} />
-                  Myth vs Fact
-                </button>
-                <button onClick={() => {
-                  const opts = [
-                    "What changes happen during puberty?",
-                    "Why do periods hurt?",
-                    "What are common signs of food allergies?",
-                    "What does inflammation mean?",
-                    "What should I know about menstrual hygiene?",
-                  ];
-                  sendMessage(opts[Math.floor(Math.random() * opts.length)]);
-                }} disabled={loading} className="quick-chip">
-                  <MessageCircleQuestion className="w-3.5 h-3.5" style={{ color: "#6366F1" }} />
-                  <span className="hidden sm:inline">I don't know what to ask</span>
-                  <span className="sm:hidden">Suggest</span>
-                </button>
-              </div>
-              <button onClick={clearChat}
-                className="p-1.5 rounded-lg transition-all flex-shrink-0"
-                style={{ color: "var(--muted)" }}
-                title="Clear private chat"
-                onMouseEnter={e => (e.currentTarget.style.color = "#EF4444")}
-                onMouseLeave={e => (e.currentTarget.style.color = "var(--muted)")}>
-                <RotateCcw className="w-4 h-4" />
-              </button>
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={loading}
+                className="h-7 text-xs gap-1 bg-white"
+                onClick={() => {
+                  const last = [...msgs].reverse().find(m => m.role === "user");
+                  if (last) send(last.content, { explainSimply: true });
+                }}
+              >
+                <Lightbulb className="w-3.5 h-3.5 text-amber-500" />
+                Explain simply
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={loading}
+                className="h-7 text-xs gap-1 bg-white"
+                onClick={() => send("Is it true that you shouldn't exercise during your period?")}
+              >
+                <Scale className="w-3.5 h-3.5 text-emerald-600" />
+                Myth vs Fact
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={loading}
+                className="h-7 text-xs gap-1 bg-white"
+                onClick={() => send("I don't know what to ask")}
+              >
+                <MessageCircleQuestion className="w-3.5 h-3.5 text-indigo-500" />
+                Suggest a question
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={clearChat}
+                className="ml-auto h-7 w-7 text-slate-400 hover:text-red-600"
+                title="Clear chat"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+              </Button>
             </div>
           )}
 
-          {/* Input Bar */}
-          <div className="rounded-2xl overflow-hidden transition-all"
-            style={{
-              background: "var(--surface)",
-              border: "1.5px solid var(--border)",
-              boxShadow: "var(--shadow-md)",
-            }}
-            onFocusCapture={e => {
-              (e.currentTarget as HTMLElement).style.borderColor = "var(--primary)";
-              (e.currentTarget as HTMLElement).style.boxShadow = "var(--shadow-md), 0 0 0 3px var(--ring)";
-            }}
-            onBlurCapture={e => {
-              (e.currentTarget as HTMLElement).style.borderColor = "var(--border)";
-              (e.currentTarget as HTMLElement).style.boxShadow = "var(--shadow-md)";
-            }}>
-            <div className="flex items-center px-4 py-3 gap-3">
-              <div className="w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0"
-                style={{ background: "var(--primary-light)" }}>
-                <Heart className="w-3.5 h-3.5 fill-current" style={{ color: "var(--primary)" }} />
-              </div>
+          {/* Minimal Input Bar */}
+          <div className="bg-white border-2 border-slate-200 focus-within:border-emerald-600 rounded-2xl shadow-xs transition-all">
+            <div className="flex items-center px-4 py-2.5 gap-2">
               <input
                 ref={inputRef}
+                autoFocus
                 type="text"
                 value={input}
                 onChange={e => setInput(e.target.value)}
-                onKeyDown={handleKeyDown}
+                onKeyDown={e => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    send();
+                  }
+                }}
                 placeholder={
-                  language === "hi" ? "अपना स्वास्थ्य प्रश्न यहाँ पूछें..." :
-                  language === "gu" ? "તમારો આરોગ્ય પ્રશ્ન અહીં પૂછો..." :
-                  "Ask any health question... e.g. 'Why do periods hurt?' or 'What is the uterus?'"
+                  language === "hi" ? "यहाँ अपना स्वास्थ्य प्रश्न पूछें…" :
+                  language === "gu" ? "અહીં તમારો આરોગ્ય પ્રશ્ન પૂછો…" :
+                  "Ask any health question… (e.g. 'Why do periods hurt?')"
                 }
-                className="flex-1 bg-transparent text-sm focus:outline-none"
-                style={{ color: "var(--text)" }}
                 disabled={loading}
-                autoFocus
+                className="flex-1 bg-transparent text-sm text-slate-900 focus:outline-none placeholder:text-slate-400"
               />
-              <button
-                onClick={() => sendMessage()}
+              <Button
+                size="sm"
+                onClick={() => send()}
                 disabled={!input.trim() || loading}
-                className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 transition-all disabled:opacity-40"
-                style={{ background: "linear-gradient(135deg, var(--primary-dark), var(--primary))", color: "#fff", boxShadow: "var(--shadow-sm)" }}>
-                <Send className="w-4 h-4" />
-              </button>
+                className="h-8 w-8 p-0 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white shrink-0"
+              >
+                <Send className="w-3.5 h-3.5" />
+              </Button>
             </div>
 
-            {/* Input bottom bar */}
-            <div className="px-4 pb-2.5 flex items-center justify-between">
-              <p className="text-[10px]" style={{ color: "var(--muted)" }}>
-                {BRAND.name} is for <strong>health education only</strong> — not medical diagnosis. Emergency? Call <strong>112 / 108</strong>.
-              </p>
-              <div className="flex items-center gap-1 flex-shrink-0">
-                {[
-                  { label: "Report", icon: <FileText className="w-3 h-3" />, action: () => setIsReportOpen(true) },
-                  { label: "QR", icon: <QrCode className="w-3 h-3" />, action: () => setIsQROpen(true) },
-                ].map(({ label, icon, action }) => (
-                  <button key={label} onClick={action}
-                    className="flex items-center gap-1 text-[10px] px-2 py-1 rounded-lg transition-all"
-                    style={{ color: "var(--muted)", border: "1px solid var(--border)" }}>
-                    {icon}<span className="hidden sm:inline">{label}</span>
-                  </button>
-                ))}
-              </div>
+            <div className="px-4 pb-2 flex items-center justify-between text-[11px] text-slate-400 border-t border-slate-50 pt-1.5">
+              <span>
+                {BRAND.name} — Private health awareness. Emergency: <strong className="text-slate-600">112 / 108</strong>
+              </span>
+              <button
+                onClick={() => setReportOpen(true)}
+                className="hover:text-emerald-700 font-medium flex items-center gap-1"
+              >
+                <FileText className="w-3 h-3" />
+                <span>Upload Report</span>
+              </button>
             </div>
           </div>
         </div>
       </main>
 
-      {/* ── MODALS ── */}
-      <HealthWordsModal word={selectedWord} onClose={() => setSelectedWord(null)}
-        onSelectRelated={term => sendMessage(`What does ${term} mean in simple terms?`)} />
-      <QRCodeModal isOpen={isQROpen} onClose={() => setIsQROpen(false)} />
-      <AuthModal isOpen={isAuthOpen} onClose={() => setIsAuthOpen(false)}
-        isLoggedIn={Boolean(userProfile?.storageConsent)}
-        onLoginSuccess={p => setUserProfile(p)}
-        onLogout={() => { setUserProfile(null); localStorage.removeItem("wellup_profile"); }} />
-      <ReportUploadModal isOpen={isReportOpen} onClose={() => setIsReportOpen(false)}
-        onReportAnalyzed={(s, a) => sendMessage(`📄 Report Summary:\n${s}${a ? `\n\n📅 Appointment: ${a}` : ""}`)} />
+      {/* ──────── MODALS ──────── */}
+      <HealthWordsModal
+        word={selWord}
+        onClose={() => setSelWord(null)}
+        onSelectRelated={t => send(`What does ${t} mean in simple terms?`)}
+      />
+      <QRCodeModal isOpen={isQROpen} onClose={() => setQROpen(false)} />
+      <ReportUploadModal
+        isOpen={isReportOpen}
+        onClose={() => setReportOpen(false)}
+        onReportAnalyzed={(s, a) => send(`📄 Report summary:\n${s}${a ? `\n📅 Recommended next step: ${a}` : ""}`)}
+      />
+      <OnboardingModal
+        isOpen={isOnboardOpen}
+        onClose={() => setOnboardOpen(false)}
+        onComplete={async p => {
+          setProfile(p);
+          if (p.language) setLanguage(p.language);
+          if (currentUser) {
+            await saveUserProfile(currentUser.id, p, currentUser.email);
+          }
+        }}
+      />
+      <AuthModal
+        isOpen={isAuthOpen}
+        onClose={() => setAuthOpen(false)}
+        currentUser={currentUser}
+        userProfile={profile}
+        onAuthSuccess={async (u, prof) => {
+          setCurrentUser(u);
+          if (prof) {
+            setProfile(prev => ({
+              ...prev,
+              nickname: prof.nickname || prev?.nickname || "",
+              ageGroup: prof.ageRange || prev?.ageGroup || "",
+              allergies: prof.allergies || prev?.allergies || [],
+              storageConsent: true,
+              overallHealth: prev?.overallHealth || "",
+              sleepHours: prev?.sleepHours || "",
+              exerciseFrequency: prev?.exerciseFrequency || "",
+              goals: prev?.goals || [],
+              dietType: prev?.dietType || "",
+              longTermConditions: prev?.longTermConditions || "",
+              heartBpConcerns: prev?.heartBpConcerns || "",
+              familyHistory: prev?.familyHistory || "",
+              sleepQuality: prev?.sleepQuality || "",
+              exerciseTypes: prev?.exerciseTypes || [],
+              fruitsVeggiesFreq: prev?.fruitsVeggiesFreq || "",
+              waterIntake: prev?.waterIntake || "",
+              smokingStatus: prev?.smokingStatus || "",
+              alcoholStatus: prev?.alcoholStatus || "",
+              sittingTime: prev?.sittingTime || "",
+              language: prev?.language || "en",
+            }));
+          }
+          // Load existing chats for this user from DB
+          const chats = await loadChatMessages(u.id);
+          if (chats && chats.length > 0) {
+            setMsgs(chats.map(c => ({
+              id: c.id,
+              role: c.role,
+              content: c.content,
+              category: c.category,
+              isEmergency: c.isEmergency,
+              ts: new Date(c.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+            })));
+          }
+        }}
+        onLogout={() => {
+          setCurrentUser(null);
+        }}
+        onOpenOnboarding={() => setOnboardOpen(true)}
+      />
     </div>
   );
 }

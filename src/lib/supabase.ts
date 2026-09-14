@@ -78,6 +78,22 @@ export async function signUpWithEmail(email: string, password: string, displayNa
   }
 }
 
+export async function signInWithGoogle(): Promise<{ error: string | null }> {
+  if (!supabase) return { error: "Supabase not configured" };
+  try {
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: {
+        redirectTo: typeof window !== "undefined" ? window.location.origin : undefined,
+      },
+    });
+    if (error) return { error: error.message };
+    return { error: null };
+  } catch (err: any) {
+    return { error: err?.message || "Failed to start Google sign-in" };
+  }
+}
+
 export async function sendMagicLink(email: string): Promise<{ success: boolean; error: string | null }> {
   if (!supabase) return { success: false, error: "Supabase not configured" };
   try {

@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
   AlertTriangle, Sparkles, Info, CheckCircle2,
-  Menu, X, FileText, Lock, ExternalLink, PanelLeft
+  Menu, X, FileText, Lock, ExternalLink, PanelLeft, MessageCircle
 } from "lucide-react";
 
 import { BRAND, HEALTH_CATEGORIES, STARTER_QUESTIONS } from "@/lib/brand";
@@ -39,6 +39,8 @@ interface Message {
   content: string;
   category?: string;
   healthWords?: HealthWord[];
+  followups?: string[];
+  options?: string[];
   sources?: string[];
   isEmergency?: boolean;
   ts: string;
@@ -189,6 +191,7 @@ export default function HomePage() {
   const [activeConvId, setActiveConvId] = useState<string | null>(null);
 
   const bottomRef = useRef<HTMLDivElement>(null);
+  const initialChatLoadedRef = useRef(false);
 
   /* ── Responsive sidebar ── */
   useEffect(() => {
@@ -208,7 +211,13 @@ export default function HomePage() {
   useEffect(() => {
     try {
       const h = localStorage.getItem("wellup_chat");
-      if (h) setMsgs(JSON.parse(h));
+      if (h) {
+        const parsed = JSON.parse(h);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setMsgs(parsed);
+          initialChatLoadedRef.current = true;
+        }
+      }
       const p = localStorage.getItem("wellup_profile");
       if (p) {
         const parsed = JSON.parse(p) as HealthProfile;
@@ -231,6 +240,12 @@ export default function HomePage() {
 
     const { data: listener } = supabase.auth.onAuthStateChange(
       async (event, session) => {
+        // Window refocus / tab switch fires TOKEN_REFRESHED: do NOT reload chat or blink UI!
+        if (event === "TOKEN_REFRESHED") {
+          if (session?.user) setCurrentUser(session.user);
+          return;
+        }
+
         if (session?.user) {
           setCurrentUser(session.user);
           await syncUserData(session.user);
@@ -283,8 +298,9 @@ export default function HomePage() {
       }))
     );
 
-    // Load most recent conversation
-    if (convs.length > 0 && msgs.length === 0) {
+    // Load most recent conversation ONLY ONCE on initial app mount
+    if (!initialChatLoadedRef.current && convs.length > 0) {
+      initialChatLoadedRef.current = true;
       const latestId = convs[0].id;
       setActiveConvId(latestId);
       const dbMsgs = await loadConversationMessages(latestId);
@@ -319,6 +335,7 @@ export default function HomePage() {
 
   /* ── New Chat ── */
   const handleNewChat = () => {
+    initialChatLoadedRef.current = true; // explicitly stay on empty new chat, don't auto-restore
     setMsgs([]);
     setActiveConvId(null);
     localStorage.removeItem("wellup_chat");
@@ -328,6 +345,7 @@ export default function HomePage() {
   /* ── Select conversation ── */
   const handleSelectConv = async (id: string) => {
     if (id === activeConvId) return;
+    initialChatLoadedRef.current = true;
     setActiveConvId(id);
     setMsgs([]);
     const dbMsgs = await loadConversationMessages(id);
@@ -422,6 +440,8 @@ export default function HomePage() {
           content: data.response || "No response received.",
           category: data.category,
           healthWords: data.healthWords || [],
+          followups: data.options || data.followups || [],
+          options: data.options || data.followups || [],
           sources: data.sources || [],
           isEmergency: Boolean(data.isEmergency),
           ts: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),

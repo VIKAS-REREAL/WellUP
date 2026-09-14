@@ -8,22 +8,16 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import {
-  signInWithEmail,
-  signUpWithEmail,
+  signInWithGoogle,
   sendMagicLink,
   signOutUser,
   UserHealthProfile,
 } from "@/lib/supabase";
 import { extractUserDisplayInfo } from "@/lib/userProfile";
-import { BRAND } from "@/lib/brand";
 import {
-  ShieldCheck,
   Mail,
-  Lock,
-  User as UserIcon,
   CheckCircle2,
   AlertCircle,
   Sparkles,
@@ -42,6 +36,29 @@ interface AuthModalProps {
   onOpenOnboarding: () => void;
 }
 
+function GoogleIcon({ className = "w-4 h-4" }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" aria-hidden="true">
+      <path
+        fill="#4285F4"
+        d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.8-2.4 3.65v3h3.88c2.27-2.09 3.665-5.17 3.665-9.09z"
+      />
+      <path
+        fill="#34A853"
+        d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.26v3.09C3.25 21.36 7.34 24 12 24z"
+      />
+      <path
+        fill="#FBBC05"
+        d="M5.28 14.32c-.25-.72-.38-1.49-.38-2.32s.13-1.6.38-2.32V6.59H1.26C.46 8.18 0 9.99 0 12c0 2.01.46 3.82 1.26 5.41l4.02-3.09z"
+      />
+      <path
+        fill="#EA4335"
+        d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.34 0 3.25 2.64 1.26 6.59l4.02 3.09c.95-2.83 3.6-4.93 6.72-4.93z"
+      />
+    </svg>
+  );
+}
+
 export function AuthModal({
   isOpen,
   onClose,
@@ -51,11 +68,9 @@ export function AuthModal({
   onLogout,
   onOpenOnboarding,
 }: AuthModalProps) {
-  const [activeTab, setActiveTab] = useState<"signin" | "signup" | "magic">("signin");
   const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [displayName, setDisplayName] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
+  const [magicLoading, setMagicLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
@@ -63,54 +78,19 @@ export function AuthModal({
     setErrorMsg(null);
     setSuccessMsg(null);
     setEmail("");
-    setPassword("");
-    setDisplayName("");
+    setGoogleLoading(false);
+    setMagicLoading(false);
   };
 
-  const handleSignIn = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleGoogleSignIn = async () => {
     setErrorMsg(null);
     setSuccessMsg(null);
-    if (!email || !password) {
-      setErrorMsg("Please provide both email and password.");
-      return;
-    }
-    setLoading(true);
-    const { user, error } = await signInWithEmail(email, password);
-    setLoading(false);
-    if (error) {
-      setErrorMsg(error);
-    } else if (user) {
-      onAuthSuccess(user);
-      onClose();
-      resetForm();
-    }
-  };
+    setGoogleLoading(true);
 
-  const handleSignUp = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setErrorMsg(null);
-    setSuccessMsg(null);
-    if (!email || !password) {
-      setErrorMsg("Please provide both email and password.");
-      return;
-    }
-    if (password.length < 6) {
-      setErrorMsg("Password must be at least 6 characters.");
-      return;
-    }
-    setLoading(true);
-    const { user, error } = await signUpWithEmail(email, password, displayName);
-    setLoading(false);
+    const { error } = await signInWithGoogle();
     if (error) {
       setErrorMsg(error);
-    } else if (user) {
-      setSuccessMsg("Account created! Check your email to confirm if required.");
-      onAuthSuccess(user, { nickname: displayName || email.split("@")[0] });
-      setTimeout(() => {
-        onClose();
-        resetForm();
-      }, 1200);
+      setGoogleLoading(false);
     }
   };
 
@@ -118,17 +98,20 @@ export function AuthModal({
     e.preventDefault();
     setErrorMsg(null);
     setSuccessMsg(null);
-    if (!email) {
-      setErrorMsg("Please enter your email address.");
+
+    if (!email || !email.includes("@")) {
+      setErrorMsg("Please enter a valid email address.");
       return;
     }
-    setLoading(true);
+
+    setMagicLoading(true);
     const { success, error } = await sendMagicLink(email);
-    setLoading(false);
+    setMagicLoading(false);
+
     if (error) {
       setErrorMsg(error);
     } else if (success) {
-      setSuccessMsg("Magic login link sent to your email!");
+      setSuccessMsg("Magic login link sent! Check your inbox to sign in.");
     }
   };
 
@@ -141,7 +124,15 @@ export function AuthModal({
   const userDisplay = extractUserDisplayInfo(currentUser?.email, userProfile?.nickname);
 
   return (
-    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
+    <Dialog
+      open={isOpen}
+      onOpenChange={(open) => {
+        if (!open) {
+          onClose();
+          resetForm();
+        }
+      }}
+    >
       <DialogContent className="sm:max-w-md p-6 bg-white dark:bg-[#18181b] border border-zinc-200 dark:border-white/10 shadow-2xl rounded-2xl text-zinc-900 dark:text-zinc-100 overflow-hidden">
         {/* Modal Header */}
         <DialogHeader className="space-y-1.5 pb-1">
@@ -153,13 +144,13 @@ export function AuthModal({
               <img src="/favicon.svg" alt="WellUP" className="w-5 h-5 rounded-md object-contain" />
             </div>
             <DialogTitle className="text-base font-bold text-zinc-900 dark:text-white">
-              {currentUser ? "Account & Health Profile" : "Sign In to WellUP"}
+              {currentUser ? "Account & Health Profile" : "Sign in to WellUP"}
             </DialogTitle>
           </div>
           <DialogDescription className="text-xs text-zinc-500 dark:text-zinc-400">
             {currentUser
               ? "Your chat history and health context are safely synced with Supabase."
-              : "Sign in to save your chat history and personalized health context across devices."}
+              : "Sign in with Google or a magic link to sync chat history and your health profile across devices."}
           </DialogDescription>
         </DialogHeader>
 
@@ -167,14 +158,14 @@ export function AuthModal({
         {errorMsg && (
           <div className="flex items-center gap-2 p-3 my-2 bg-red-50 dark:bg-red-950/40 text-red-700 dark:text-red-300 text-xs rounded-xl border border-red-200 dark:border-red-800/40">
             <AlertCircle className="w-4 h-4 shrink-0" />
-            <span>{errorMsg}</span>
+            <span className="leading-tight">{errorMsg}</span>
           </div>
         )}
 
         {successMsg && (
           <div className="flex items-center gap-2 p-3 my-2 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 text-xs rounded-xl border border-emerald-200 dark:border-emerald-800/40">
             <CheckCircle2 className="w-4 h-4 shrink-0" />
-            <span>{successMsg}</span>
+            <span className="leading-tight">{successMsg}</span>
           </div>
         )}
 
@@ -230,7 +221,7 @@ export function AuthModal({
                     onClose();
                     onOpenOnboarding();
                   }}
-                  className="text-emerald-600 dark:text-emerald-400 hover:text-emerald-500 font-bold hover:underline text-[11px] inline-flex items-center gap-1"
+                  className="text-emerald-600 dark:text-emerald-400 hover:text-emerald-500 font-bold hover:underline text-[11px] inline-flex items-center gap-1 cursor-pointer"
                 >
                   <span>Edit Profile</span>
                   <ArrowRight className="w-3 h-3" />
@@ -253,12 +244,12 @@ export function AuthModal({
               </div>
             </div>
 
-            {/* Bottom Actions Grid: Perfect 2-column balance with zero overflow */}
+            {/* Bottom Actions Grid */}
             <div className="grid grid-cols-2 gap-3 pt-2 mt-1">
               <button
                 type="button"
                 onClick={handleSignOut}
-                className="w-full flex items-center justify-center gap-1.5 py-2.5 px-4 rounded-xl text-xs font-semibold border border-red-500/20 dark:border-red-500/30 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors"
+                className="w-full flex items-center justify-center gap-1.5 py-2.5 px-4 rounded-xl text-xs font-semibold border border-red-500/20 dark:border-red-500/30 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors cursor-pointer"
               >
                 <LogOut className="w-3.5 h-3.5" />
                 <span>Sign Out</span>
@@ -266,189 +257,79 @@ export function AuthModal({
               <button
                 type="button"
                 onClick={onClose}
-                className="w-full flex items-center justify-center py-2.5 px-4 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm transition-colors"
+                className="w-full flex items-center justify-center py-2.5 px-4 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm transition-colors cursor-pointer"
               >
                 Done
               </button>
             </div>
           </div>
         ) : (
-          /* ─── AUTH FORM TABS (Bulletproof Segmented Control) ─── */
-          <div className="flex flex-col w-full pt-1">
-            {/* Top Segmented Tabs: 3 Equal Columns */}
-            <div className="grid grid-cols-3 p-1 rounded-xl bg-zinc-100 dark:bg-[#222226] border border-zinc-200/80 dark:border-white/5 gap-1 mb-4">
-              <button
-                type="button"
-                onClick={() => { setActiveTab("signin"); setErrorMsg(null); }}
-                className={`py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                  activeTab === "signin"
-                    ? "bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white shadow-sm"
-                    : "text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-white"
-                }`}
-              >
-                Sign In
-              </button>
-              <button
-                type="button"
-                onClick={() => { setActiveTab("signup"); setErrorMsg(null); }}
-                className={`py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                  activeTab === "signup"
-                    ? "bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white shadow-sm"
-                    : "text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-white"
-                }`}
-              >
-                Sign Up
-              </button>
-              <button
-                type="button"
-                onClick={() => { setActiveTab("magic"); setErrorMsg(null); }}
-                className={`py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                  activeTab === "magic"
-                    ? "bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white shadow-sm"
-                    : "text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-white"
-                }`}
-              >
-                Magic Link
-              </button>
+          /* ─── STREAMLINED AUTH: GOOGLE OAUTH + MAGIC LINK ONLY ─── */
+          <div className="flex flex-col w-full pt-2 space-y-4">
+            {/* 1. Google OAuth Button */}
+            <button
+              type="button"
+              onClick={handleGoogleSignIn}
+              disabled={googleLoading || magicLoading}
+              className="w-full flex items-center justify-center gap-3 py-3 px-4 rounded-xl text-xs sm:text-sm font-semibold border border-zinc-200 dark:border-white/10 bg-zinc-50 hover:bg-zinc-100 dark:bg-[#222226] dark:hover:bg-[#2a2a30] text-zinc-900 dark:text-white shadow-sm transition-all hover:shadow active:scale-[0.99] disabled:opacity-50 cursor-pointer"
+            >
+              {googleLoading ? (
+                <Loader2 className="w-4 h-4 animate-spin text-zinc-500" />
+              ) : (
+                <GoogleIcon className="w-4 h-4 shrink-0" />
+              )}
+              <span>{googleLoading ? "Connecting to Google..." : "Continue with Google"}</span>
+            </button>
+
+            {/* Divider */}
+            <div className="relative flex items-center justify-center">
+              <div className="absolute inset-0 flex items-center">
+                <div className="w-full border-t border-zinc-200 dark:border-white/10" />
+              </div>
+              <div className="relative px-3 bg-white dark:bg-[#18181b] text-[10px] font-semibold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider">
+                or continue with email
+              </div>
             </div>
 
-            {/* TAB CONTENT: Sign In */}
-            {activeTab === "signin" && (
-              <form onSubmit={handleSignIn} className="flex flex-col space-y-3.5">
-                <div className="space-y-1.5">
-                  <label className="text-[11px] font-semibold text-zinc-600 dark:text-zinc-400">Email Address</label>
-                  <div className="relative">
-                    <Mail className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
-                    <input
-                      type="email"
-                      placeholder="name@example.com"
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      className="w-full pl-9 pr-3 py-2 text-xs rounded-xl bg-zinc-50 dark:bg-[#222226] border border-zinc-200 dark:border-white/10 text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-colors"
-                      required
-                    />
-                  </div>
+            {/* 2. Magic Link Flow */}
+            <form onSubmit={handleMagicLink} className="flex flex-col space-y-3">
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-semibold text-zinc-600 dark:text-zinc-400">
+                  Email Address
+                </label>
+                <div className="relative">
+                  <Mail className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
+                  <input
+                    type="email"
+                    placeholder="name@example.com"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    className="w-full pl-9 pr-3 py-2.5 text-xs rounded-xl bg-zinc-50 dark:bg-[#222226] border border-zinc-200 dark:border-white/10 text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-colors"
+                    required
+                  />
                 </div>
+              </div>
 
-                <div className="space-y-1.5">
-                  <label className="text-[11px] font-semibold text-zinc-600 dark:text-zinc-400">Password</label>
-                  <div className="relative">
-                    <Lock className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
-                    <input
-                      type="password"
-                      placeholder="••••••••"
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      className="w-full pl-9 pr-3 py-2 text-xs rounded-xl bg-zinc-50 dark:bg-[#222226] border border-zinc-200 dark:border-white/10 text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-colors"
-                      required
-                    />
-                  </div>
-                </div>
+              <button
+                type="submit"
+                disabled={magicLoading || googleLoading || !email.trim()}
+                className="w-full py-2.5 px-4 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm transition-colors flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer"
+              >
+                {magicLoading && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                <span>{magicLoading ? "Sending Magic Link..." : "Send Magic Link"}</span>
+              </button>
+            </form>
 
-                <button
-                  type="submit"
-                  disabled={loading}
-                  className="w-full py-2.5 px-4 mt-2 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
-                >
-                  {loading && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                  <span>{loading ? "Signing In..." : "Sign In"}</span>
-                </button>
-              </form>
-            )}
-
-            {/* TAB CONTENT: Sign Up */}
-            {activeTab === "signup" && (
-              <form onSubmit={handleSignUp} className="flex flex-col space-y-3.5">
-                <div className="space-y-1.5">
-                  <label className="text-[11px] font-semibold text-zinc-600 dark:text-zinc-400">Display Nickname</label>
-                  <div className="relative">
-                    <UserIcon className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
-                    <input
-                      type="text"
-                      placeholder="e.g. Vikas, Maya, Sam"
-                      value={displayName}
-                      onChange={(e) => setDisplayName(e.target.value)}
-                      className="w-full pl-9 pr-3 py-2 text-xs rounded-xl bg-zinc-50 dark:bg-[#222226] border border-zinc-200 dark:border-white/10 text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-colors"
-                    />
-                  </div>
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="text-[11px] font-semibold text-zinc-600 dark:text-zinc-400">Email Address</label>
-                  <div className="relative">
-                    <Mail className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
-                    <input
-                      type="email"
-                      placeholder="name@example.com"
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      className="w-full pl-9 pr-3 py-2 text-xs rounded-xl bg-zinc-50 dark:bg-[#222226] border border-zinc-200 dark:border-white/10 text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-colors"
-                      required
-                    />
-                  </div>
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="text-[11px] font-semibold text-zinc-600 dark:text-zinc-400">Password (min 6 characters)</label>
-                  <div className="relative">
-                    <Lock className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
-                    <input
-                      type="password"
-                      placeholder="••••••••"
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      className="w-full pl-9 pr-3 py-2 text-xs rounded-xl bg-zinc-50 dark:bg-[#222226] border border-zinc-200 dark:border-white/10 text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-colors"
-                      required
-                    />
-                  </div>
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={loading}
-                  className="w-full py-2.5 px-4 mt-2 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
-                >
-                  {loading && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                  <span>{loading ? "Creating Account..." : "Create Account"}</span>
-                </button>
-              </form>
-            )}
-
-            {/* TAB CONTENT: Magic Link */}
-            {activeTab === "magic" && (
-              <form onSubmit={handleMagicLink} className="flex flex-col space-y-3.5">
-                <div className="space-y-1.5">
-                  <label className="text-[11px] font-semibold text-zinc-600 dark:text-zinc-400">Email Address</label>
-                  <div className="relative">
-                    <Mail className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
-                    <input
-                      type="email"
-                      placeholder="name@example.com"
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      className="w-full pl-9 pr-3 py-2 text-xs rounded-xl bg-zinc-50 dark:bg-[#222226] border border-zinc-200 dark:border-white/10 text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-colors"
-                      required
-                    />
-                  </div>
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={loading}
-                  className="w-full py-2.5 px-4 mt-2 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
-                >
-                  {loading && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                  <span>{loading ? "Sending Link..." : "Send Magic Login Link"}</span>
-                </button>
-              </form>
-            )}
+            <p className="text-[11px] text-zinc-400 dark:text-zinc-500 text-center leading-relaxed">
+              No passwords to remember. We’ll email you a secure login link.
+            </p>
 
             {/* Guest Option Footer */}
-            <div className="pt-4 mt-4 border-t border-zinc-100 dark:border-white/5 text-center">
+            <div className="pt-2 border-t border-zinc-100 dark:border-white/5 text-center">
               <button
                 type="button"
                 onClick={onClose}
-                className="text-[11px] text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white font-medium underline transition-colors"
+                className="text-[11px] text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white font-medium underline transition-colors cursor-pointer"
               >
                 Continue as anonymous guest (zero account required)
               </button>

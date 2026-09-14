@@ -239,9 +239,9 @@ export function ReportUploadModal({
     const factsText = result.extractedFacts
       .map(f => `• ${f.label}: ${f.value}`)
       .join("\n");
-    const fullText = `📄 **Analyzed Medical Document (${result.fileName})**\n\n**Summary:**\n${result.summary}\n\n**Key Health Facts:**\n${factsText}${
-      result.appointment ? `\n\n📅 **Follow-up Appointment:** ${result.appointment}` : ""
-    }\n\nCan you explain these findings in more detail and tell me what questions I should ask my doctor?`;
+    const dateLine = result.reportDate ? `\n\n🗓️ **Report Date:** ${result.reportDate}` : "";
+    const aptLine = result.appointment ? `\n\n📅 **Follow-up Appointment:** ${result.appointment}` : "";
+    const fullText = `📄 **Analyzed Medical Document (${result.fileName})**\n\n**Summary:**\n${result.summary}${dateLine}\n\n**Key Health Facts:**\n${factsText}${aptLine}\n\nCan you explain these findings in more detail and tell me what questions I should ask my doctor?`;
 
     onReportAnalyzed(result.summary, result.appointment, fullText);
     onClose();
